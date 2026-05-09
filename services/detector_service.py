@@ -226,9 +226,14 @@ def detect_split(
 
     if mode == "precision":
         # Tight mask via AND with low-saturation/edge heuristic.
+        # Trade-off: thin (<3 px) diagonal text strokes between tiled
+        # logos get filtered by the heuristic, so precision mode is
+        # *not* the right choice for full-bleed tiled stock-photo
+        # watermarks — use 'recall' for those. For single-instance
+        # watermarks (one corner stamp, a logo) the AND avoids
+        # accidentally masking subject content like hair / denim.
         pixel_mask = _heuristic_pixel_mask(img_bgr)
         body = cv2.bitwise_and(cam_mask, pixel_mask)
-        # Modest cleanup for precision mode.
         body = cv2.morphologyEx(
             body, cv2.MORPH_CLOSE,
             cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))

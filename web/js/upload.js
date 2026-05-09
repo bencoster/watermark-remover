@@ -22,9 +22,9 @@ function initUpload() {
         <button class="btn btn-danger" id="btnClearUpload">Clear</button>
       </div>
       <div class="strip-mode-toggle">
-        <span class="strip-mode-label">Detection:</span>
-        <label><input type="radio" name="detectMode" value="recall" checked> Recall (tiled watermarks)</label>
-        <label><input type="radio" name="detectMode" value="precision"> Precision (single mark)</label>
+        <span class="strip-mode-label" title="Tiled = repeating pattern across whole image (stock photos). Single = one isolated logo or stamp.">Watermark type:</span>
+        <label title="Best for stock photos with the watermark repeating in a grid (Dreamstime, Shutterstock, Getty). Catches every tile but masks ~50% of the image."><input type="radio" name="detectMode" value="recall" checked> Tiled / stock-photo grid</label>
+        <label title="Best for a single isolated watermark — corner stamp, one brand logo. Uses a tighter mask to avoid touching surrounding subject content."><input type="radio" name="detectMode" value="precision"> Single mark / corner stamp</label>
       </div>
       <div class="strip-mode-toggle">
         <span class="strip-mode-label">Bottom strip bar:</span>
