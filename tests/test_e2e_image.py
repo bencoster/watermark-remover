@@ -13,12 +13,14 @@ sys.path.insert(0, str(ROOT))
 
 import cv2
 
-from services.detector_service import detect_split, prefill_strip
+from services.detector_service import (
+    detect_split, prefill_strip, crop_strip, crop_strip_mask,
+)
 from services.lama_service import inpaint, load_model
 from services.cuda_policy import get_device
 
 
-def main(image_path: str, out_dir: str = "tmp/e2e_out"):
+def main(image_path: str, out_dir: str = "tmp/e2e_out", strip_mode: str = "inpaint"):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -34,7 +36,6 @@ def main(image_path: str, out_dir: str = "tmp/e2e_out"):
     print(f"      body mask: {body_mask_path}")
     print(f"      strip mask: {strip_mask_path or '(none)'}")
 
-    # Visual overlay: red = body (LaMa), blue = strip text (TELEA)
     img = cv2.imread(image_path)
     body = cv2.imread(body_mask_path, cv2.IMREAD_GRAYSCALE)
     overlay = img.copy()
@@ -49,16 +50,31 @@ def main(image_path: str, out_dir: str = "tmp/e2e_out"):
         shutil.copy(strip_mask_path, out / "mask_strip.png")
     print(f"      overlay saved: {out / 'mask_overlay.png'}")
 
-    # Pass 1: TELEA pre-fill of the thin strip-text glyphs (no learned prior).
     image_for_lama = image_path
+    body_mask_for_lama = body_mask_path
+
     if strip_mask_path is not None:
-        print(f"[2/4] TELEA pre-fill on strip text")
-        t0 = time.time()
-        image_for_lama = prefill_strip(image_path, strip_mask_path, radius=4)
-        print(f"      prefill took {time.time() - t0:.2f}s")
-        shutil.copy(image_for_lama, out / "step_prefilled.png")
+        if strip_mode == "crop":
+            print(f"[2/4] Strip mode: crop")
+            t0 = time.time()
+            cropped = crop_strip(image_path, strip_mask_path)
+            if cropped is not None:
+                image_for_lama = cropped
+                body_mask_for_lama = crop_strip_mask(body_mask_path, strip_mask_path)
+                print(f"      crop took {time.time() - t0:.2f}s -> kept rows above bar")
+                shutil.copy(image_for_lama, out / "step_cropped.png")
+            else:
+                print(f"      no full-width bar - falling back to TELEA")
+                image_for_lama = prefill_strip(image_path, strip_mask_path, radius=4)
+                shutil.copy(image_for_lama, out / "step_prefilled.png")
+        else:
+            print(f"[2/4] Strip mode: inpaint (TELEA pre-fill)")
+            t0 = time.time()
+            image_for_lama = prefill_strip(image_path, strip_mask_path, radius=4)
+            print(f"      prefill took {time.time() - t0:.2f}s")
+            shutil.copy(image_for_lama, out / "step_prefilled.png")
     else:
-        print(f"[2/4] No strip mask - skipping TELEA pre-fill")
+        print(f"[2/4] No strip mask - skipping strip handling")
 
     print(f"[3/4] Loading LaMa model on {get_device()}")
     t0 = time.time()
@@ -67,7 +83,7 @@ def main(image_path: str, out_dir: str = "tmp/e2e_out"):
 
     print(f"      Running LaMa inpaint on body mask")
     t0 = time.time()
-    result_path = inpaint(image_for_lama, body_mask_path, get_device(), model)
+    result_path = inpaint(image_for_lama, body_mask_for_lama, get_device(), model)
     print(f"      inpaint took {time.time() - t0:.2f}s")
 
     final_result = out / "result.png"
@@ -78,4 +94,5 @@ def main(image_path: str, out_dir: str = "tmp/e2e_out"):
 
 if __name__ == "__main__":
     img = sys.argv[1] if len(sys.argv) > 1 else "/tmp/test_image.jpg"
-    sys.exit(main(img))
+    mode = sys.argv[2] if len(sys.argv) > 2 else "inpaint"
+    sys.exit(main(img, strip_mode=mode))

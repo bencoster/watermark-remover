@@ -245,6 +245,66 @@ def detect_split(
     return body_path, strip_path, p_full
 
 
+def strip_crop_row(strip_mask_path: str, min_full_width_frac: float = 0.85) -> Optional[int]:
+    """Return the top Y of the bottom strip bar in the strip mask, or None.
+
+    A "strip bar" is a contiguous block of rows near the bottom of the
+    mask where each row is mostly (≥ min_full_width_frac) marked. This
+    is what the Dreamstime/Shutterstock-style solid colour footers look
+    like after `_strip_text_mask` has applied the bar extension. We
+    want the cropper to cut JUST above this block, removing the entire
+    footer without taking any image content above it.
+
+    Returns None when no full-width band is present (e.g. the strip
+    mask is only individual letter shapes — no solid-colour bar to
+    crop). The caller should fall back to inpaint mode in that case.
+    """
+    strip = cv2.imread(strip_mask_path, cv2.IMREAD_GRAYSCALE)
+    if strip is None:
+        return None
+    h, w = strip.shape
+    row_frac = (strip > 0).mean(axis=1)
+    # Walk up from the bottom: find the highest row where the bar is
+    # still ≥ min_full_width_frac wide. Rows above that are "image
+    # content where some glyphs may stick up" — cropping there would
+    # discard real content.
+    bar_top = None
+    for y in range(h - 1, -1, -1):
+        if row_frac[y] >= min_full_width_frac:
+            bar_top = y
+        else:
+            if bar_top is not None:
+                break
+    return bar_top
+
+
+def crop_strip(image_path: str, strip_mask_path: str) -> Optional[str]:
+    """Crop the image to remove the bottom strip bar. Returns None when
+    no full-width bar is detected (caller should fall back to inpaint)."""
+    bar_top = strip_crop_row(strip_mask_path)
+    if bar_top is None:
+        return None
+    img = cv2.imread(image_path)
+    if img is None:
+        return None
+    cropped = img[:bar_top, :]
+    out = tempfile.mktemp(suffix="_cropped.png", dir=str(TMP_DIR))
+    cv2.imwrite(out, cropped)
+    return out
+
+
+def crop_strip_mask(body_mask_path: str, strip_mask_path: str) -> str:
+    """Crop the body mask to match the cropped image. Returns new path."""
+    body = cv2.imread(body_mask_path, cv2.IMREAD_GRAYSCALE)
+    bar_top = strip_crop_row(strip_mask_path)
+    if bar_top is None or body is None:
+        return body_mask_path
+    cropped = body[:bar_top, :]
+    out = tempfile.mktemp(suffix="_cropped_body.png", dir=str(TMP_DIR))
+    cv2.imwrite(out, cropped)
+    return out
+
+
 def prefill_strip(image_path: str, strip_mask_path: str, radius: int = 3) -> str:
     """Use cv2.inpaint TELEA to fill the strip-text mask in-place.
 

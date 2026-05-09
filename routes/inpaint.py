@@ -4,7 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse
 
 from services.model_manager import manager
@@ -46,12 +46,30 @@ async def inpaint_endpoint(
 @router.post("/api/auto")
 async def auto_pipeline_endpoint(
     file: UploadFile = File(...),
+    strip_mode: str = Form("inpaint"),
 ):
-    """One-click watermark removal: classifier-gated detector +
-    TELEA strip pre-fill + LaMa body inpaint. Returns the cleaned
-    image, or a 422 JSON when the classifier says the image is clean.
+    """One-click watermark removal.
+
+    Pipeline: classifier-gated detector → strip handling → LaMa body inpaint.
+
+    `strip_mode` controls how the bottom solid-colour footer (e.g.
+    Dreamstime's blue bar with the URL/ID text) is handled:
+      - "inpaint" (default) — TELEA pre-fill the strip from the rows
+        above, then LaMa cleans body watermarks. Image dimensions
+        preserved.
+      - "crop" — physically crop the image just above the footer.
+        No hallucination risk, but image gets shorter. Falls back to
+        inpaint when the strip mask isn't a clean full-width bar.
     """
-    from services.detector_service import detect_split, prefill_strip
+    if strip_mode not in ("inpaint", "crop"):
+        return JSONResponse(
+            {"error": f"Invalid strip_mode: {strip_mode!r}. Use 'inpaint' or 'crop'."},
+            status_code=400,
+        )
+
+    from services.detector_service import (
+        detect_split, prefill_strip, crop_strip, crop_strip_mask,
+    )
 
     TMP_DIR.mkdir(exist_ok=True)
     img_tmp = tempfile.NamedTemporaryFile(
@@ -71,14 +89,29 @@ async def auto_pipeline_endpoint(
         body_mask_path, strip_mask_path, p_full = result
 
         image_for_lama = img_tmp.name
+        body_mask_for_lama = body_mask_path
+
         if strip_mask_path is not None:
-            image_for_lama = await asyncio.to_thread(
-                prefill_strip, img_tmp.name, strip_mask_path, 4
-            )
+            if strip_mode == "crop":
+                cropped = await asyncio.to_thread(crop_strip, img_tmp.name, strip_mask_path)
+                if cropped is not None:
+                    image_for_lama = cropped
+                    body_mask_for_lama = await asyncio.to_thread(
+                        crop_strip_mask, body_mask_path, strip_mask_path
+                    )
+                else:
+                    # No clean full-width bar -> fall back to TELEA.
+                    image_for_lama = await asyncio.to_thread(
+                        prefill_strip, img_tmp.name, strip_mask_path, 4
+                    )
+            else:
+                image_for_lama = await asyncio.to_thread(
+                    prefill_strip, img_tmp.name, strip_mask_path, 4
+                )
 
         model = manager.get("lama")
         result_path = await asyncio.to_thread(
-            inpaint, image_for_lama, body_mask_path, manager.device, model
+            inpaint, image_for_lama, body_mask_for_lama, manager.device, model
         )
         return FileResponse(result_path, media_type="image/png", filename="cleaned.png")
     except Exception as e:
