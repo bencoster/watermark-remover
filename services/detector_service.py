@@ -315,12 +315,20 @@ def detect_split(
         # blobs (typical for tiled stock-photo watermarks), fit a 2D
         # lattice to the centroids and predict every missing tile +
         # connecting stroke. No-op when no lattice is detected.
-        # Tuned to match the ground-truth diff mask of the dreamstime
-        # fixture: logos there are ~25-30px diameter and text strokes
-        # are ~3-5px wide. Bigger values inflate over-mask coverage
-        # without improving recall (verified empirically).
-        body = grid_complete(body, image_bgr=img_bgr,
-                             disc_radius=14, line_thickness=4)
+        # Tile geometry auto-scales from the detected lattice pitch,
+        # so the same grid_complete works at 0.25x..1.5x image sizes.
+        # We *revert* to the pre-lattice mask if grid completion would
+        # push coverage above the recall-mode cap — at non-canonical
+        # scales the lattice voter occasionally latches onto outlier
+        # offsets (purely horizontal, lattice-of-noise, etc.) and we'd
+        # rather ship a slightly-under-covered mask than a wildly
+        # over-masked one and fail outright.
+        body_pre = body.copy()
+        body = grid_complete(body, image_bgr=img_bgr)
+        post_cov = float((body > 0).mean())
+        if post_cov > 0.62:
+            logger.info("grid_complete inflated coverage to %.2f — reverting", post_cov)
+            body = body_pre
 
     body_coverage = body.sum() / 255 / total_px
     logger.info("detector: body coverage=%.4f cam>%.2f", body_coverage, cam_threshold)

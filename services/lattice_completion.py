@@ -158,6 +158,7 @@ def grid_complete(
     disc_radius: int = 18,
     line_thickness: int = 6,
     max_lattice_points: int = 400,
+    auto_scale: bool = True,
 ) -> np.ndarray:
     """Predict missing lattice points and connecting strokes from a partial mask.
 
@@ -181,6 +182,43 @@ def grid_complete(
         logger.info("grid_complete: no clear lattice — skipping")
         return mask
     v1, v2 = vec
+
+    # Sanity-check the lattice. At small image scales the vote can latch
+    # onto outlier offsets — e.g. v1 ≈ image_width, which would draw a
+    # single huge line spanning the whole image. We require both
+    # generator vectors to be:
+    #   - shorter than half the smaller image dimension (real watermark
+    #     tiles are much smaller than half the image)
+    #   - longer than 16 px (no degenerate near-zero vectors)
+    #   - not too close to parallel (cross product must be > 5% of |v1||v2|)
+    h, w = mask.shape[:2]
+    max_len = 0.5 * min(h, w)
+    min_len = 16.0
+    l1 = float(np.linalg.norm(v1))
+    l2 = float(np.linalg.norm(v2))
+    if not (min_len <= l1 <= max_len and min_len <= l2 <= max_len):
+        logger.info("grid_complete: lattice vectors out of range "
+                    "(|v1|=%.1f |v2|=%.1f, allowed [%.1f, %.1f]) — skipping",
+                    l1, l2, min_len, max_len)
+        return mask
+    cross = abs(v1[0] * v2[1] - v1[1] * v2[0])
+    if cross < 0.05 * l1 * l2:
+        logger.info("grid_complete: lattice generators near-parallel — skipping")
+        return mask
+
+    # Scale disc/line dimensions to match the detected tile spacing.
+    # Hardcoded values (14 / 4) were calibrated against the 1600x1157
+    # canonical fixture; on smaller or larger inputs the same physical
+    # tile occupies fewer/more pixels. Use a fraction of the shorter
+    # generator vector — that's roughly the tile pitch.
+    if auto_scale:
+        tile_pitch = min(l1, l2)
+        # 14 px disc / 90 px tile pitch -> 0.155 ratio at calibration.
+        # Likewise 4/90 -> 0.044 for line thickness.
+        disc_radius = max(4, int(round(tile_pitch * 0.16)))
+        line_thickness = max(2, int(round(tile_pitch * 0.045)))
+        logger.info("grid_complete: auto-scaled disc=%d line=%d (pitch=%.0f)",
+                    disc_radius, line_thickness, tile_pitch)
 
     h, w = mask.shape[:2]
     # Anchor the lattice at the median centroid to minimise misalignment.
