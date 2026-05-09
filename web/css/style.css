@@ -10,3 +10,54 @@ main { max-width: 1200px; margin: 1rem auto; padding: 0 1rem; }
 .panel.active { display: block; }
 .toast { position: fixed; bottom: 1rem; right: 1rem; background: #0f3460; color: #e0e0e0; padding: 0.6rem 1.2rem; border-radius: 6px; z-index: 999; animation: fadeIn 0.2s; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Upload */
+.upload-zone { border: 2px dashed #0f3460; border-radius: 12px; padding: 3rem; text-align: center; cursor: pointer; transition: border-color 0.2s; margin: 2rem 0; }
+.upload-zone:hover, .upload-zone.dragover { border-color: #e94560; background: rgba(233,69,96,0.05); }
+.upload-icon { font-size: 3rem; margin-bottom: 1rem; }
+.upload-hint { color: #666; font-size: 0.85rem; margin-top: 0.5rem; }
+.upload-preview { margin: 1rem 0; }
+.preview-container { max-width: 600px; margin: 0 auto; }
+.preview-container img, .preview-container video { max-width: 100%; border-radius: 8px; }
+.preview-actions { display: flex; gap: 0.5rem; justify-content: center; margin-top: 1rem; }
+
+/* Buttons */
+.btn { padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: opacity 0.2s; }
+.btn:hover { opacity: 0.85; }
+.btn-primary { background: #e94560; color: #fff; }
+.btn-secondary { background: #0f3460; color: #e0e0e0; }
+.btn-danger { background: #444; color: #e0e0e0; }
+.btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+
+/* Mask editor */
+.mask-editor { margin: 1rem 0; }
+.mask-toolbar { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; padding: 0.5rem; background: #16213e; border-radius: 6px; }
+.mask-toolbar label { color: #aaa; font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem; }
+.mask-canvas-wrap { position: relative; display: inline-block; max-width: 100%; }
+.mask-canvas-wrap img { display: block; max-width: 100%; border-radius: 8px; }
+.mask-canvas-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
+.result-preview { margin-top: 1rem; text-align: center; }
+.result-img { max-width: 100%; border-radius: 8px; margin: 0.5rem 0; }
+
+/* Jobs */
+.job-card { background: #16213e; border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.5rem; }
+.job-header { display: flex; justify-content: space-between; margin-bottom: 0.3rem; }
+.job-id { font-family: monospace; color: #888; font-size: 0.85rem; }
+.job-status { font-size: 0.8rem; padding: 0.15rem 0.5rem; border-radius: 10px; }
+.job-queued .job-status { background: #0f3460; }
+.job-running .job-status { background: #e94560; }
+.job-succeeded .job-status { background: #2d6a4f; }
+.job-failed .job-status { background: #6b2c2c; }
+.job-kind { color: #888; font-size: 0.85rem; }
+.job-stage { color: #aaa; font-size: 0.8rem; }
+.job-error { color: #e94560; font-size: 0.8rem; }
+.progress-bar { height: 4px; background: #0a0a1a; border-radius: 2px; margin: 0.3rem 0; overflow: hidden; }
+.progress-fill { height: 100%; background: #e94560; transition: width 0.3s; }
+.empty { color: #666; text-align: center; padding: 2rem; }
+
+/* GPU status */
+.status-card { background: #16213e; border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem; }
+.status-card h3, .status-card h4 { margin-bottom: 0.5rem; }
+.gpu-skipped { opacity: 0.5; }
+.vram-bar { height: 8px; background: #0a0a1a; border-radius: 4px; overflow: hidden; margin: 0.3rem 0; }
+.vram-used { height: 100%; background: #e94560; transition: width 0.3s; }
