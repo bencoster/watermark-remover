@@ -107,12 +107,37 @@ def _strip_text_mask(img_bgr: np.ndarray) -> np.ndarray:
         if min_h <= ch <= max_h and ca >= 6 and cw <= ch * 6:
             glyph_mask[labels == i] = 255
 
-    # Modest dilation around each letter — keeps inter-letter white pixels visible
+    # Modest dilation around each letter
     glyph_mask = cv2.dilate(
         glyph_mask,
         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
         iterations=1,
     )
+
+    # Solid-bar extension: stock photos often place text inside a
+    # solid-colour bar (Dreamstime's blue strip, Shutterstock's white
+    # band, etc.). When we find glyphs near the bottom edge, look at
+    # their bounding rows — if those rows are dominated by a single
+    # non-white colour, mark every pixel in those rows as "watermark"
+    # so TELEA fills the full bar from the content above. We do NOT
+    # do this for body/inner watermarks where adjacent pixels are
+    # legitimate subject content.
+    bottom_glyph_rows = np.where(glyph_mask[h - band_h:h].any(axis=1))[0]
+    if bottom_glyph_rows.size:
+        first_row = h - band_h + bottom_glyph_rows[0]
+        # Probe the brightness of the rows around the glyphs. If they
+        # form a contiguous non-white bar, extend the mask all the way
+        # to the bottom edge so TELEA only sources fill pixels from
+        # above (the legitimate content) — leaving even one row of
+        # bar pixels at the boundary causes TELEA to propagate the
+        # bar colour into the mask.
+        bar_top = max(0, first_row - 4)
+        bar_slice = img_bgr[bar_top:h, :]
+        if bar_slice.size:
+            median_v = float(np.median(cv2.cvtColor(bar_slice, cv2.COLOR_BGR2GRAY)))
+            if median_v < 215:
+                glyph_mask[bar_top:h, :] = 255
+
     return glyph_mask
 
 
@@ -122,12 +147,44 @@ def detect(
     cam_threshold: float = 0.20,
     strip_text_confidence: float = 0.70,
 ) -> Optional[str]:
-    """Detect watermark region in an image.
+    """Single-mask compatibility shim.
 
-    Returns:
-        Path to binary mask PNG (255=watermark, 0=keep), or None when
-        the classifier says the image is clean or coverage is out of
-        plausible range.
+    Returns the combined mask path (body + strip text), or None if
+    nothing detected. Useful for callers that take one mask only
+    (the public /api/detect route). For best-quality results, prefer
+    :func:`detect_split` and use a two-pass inpaint pipeline.
+    """
+    result = detect_split(image_path, cls_threshold=cls_threshold,
+                          cam_threshold=cam_threshold,
+                          strip_text_confidence=strip_text_confidence)
+    if result is None:
+        return None
+    body_path, strip_path, _ = result
+
+    body = cv2.imread(body_path, cv2.IMREAD_GRAYSCALE)
+    if strip_path is not None:
+        strip = cv2.imread(strip_path, cv2.IMREAD_GRAYSCALE)
+        body = cv2.bitwise_or(body, strip)
+
+    out_path = tempfile.mktemp(suffix=".png", dir=str(TMP_DIR))
+    cv2.imwrite(out_path, body)
+    return out_path
+
+
+def detect_split(
+    image_path: str,
+    cls_threshold: float = 0.30,
+    cam_threshold: float = 0.20,
+    strip_text_confidence: float = 0.70,
+) -> Optional[tuple[str, Optional[str], float]]:
+    """Detect watermark regions, returning (body_mask, strip_mask, p_full).
+
+    Body mask covers larger watermark regions and goes to LaMa. Strip
+    mask covers thin text glyphs at image borders and should be
+    pre-inpainted with cv2.inpaint(TELEA) before LaMa — LaMa's banner
+    prior hallucinates colored bars when given thin horizontal masks.
+
+    Returns None when the image is classified clean.
     """
     img_bgr = cv2.imread(image_path)
     if img_bgr is None:
@@ -140,14 +197,13 @@ def detect(
     device = get_device()
     classifier = _get_classifier(device)
 
-    # 1. Gate: is this image watermarked at all?
     pil = Image.open(image_path)
     p_full = float(predict_batch(classifier, [pil], device)[0])
     logger.info("classifier P(watermarked) full = %.3f", p_full)
     if p_full < cls_threshold:
         return None
 
-    # 2. Grad-CAM heatmap — needs gradients on the leaves
+    # Grad-CAM heatmap — body-area watermarks
     for p in classifier.parameters():
         p.requires_grad_(True)
     classifier.train(False)
@@ -155,40 +211,53 @@ def detect(
     for p in classifier.parameters():
         p.requires_grad_(False)
 
-    # 3. Threshold the heatmap → coarse spatial prior
     cam_mask = (heatmap > cam_threshold).astype(np.uint8) * 255
-
-    # 4. Pixel-level refinement: AND with low-sat / high-pass mask
     pixel_mask = _heuristic_pixel_mask(img_bgr)
-    refined = cv2.bitwise_and(cam_mask, pixel_mask)
-
-    # 5. Morphology on the body-area mask: close gaps inside text
-    #    strokes, dilate to cover anti-aliasing.
-    refined = cv2.morphologyEx(
-        refined, cv2.MORPH_CLOSE,
+    body = cv2.bitwise_and(cam_mask, pixel_mask)
+    body = cv2.morphologyEx(
+        body, cv2.MORPH_CLOSE,
         cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))
     )
-    refined = cv2.dilate(
-        refined, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+    body = cv2.dilate(
+        body, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
         iterations=2,
     )
 
-    # 6. After the body-area morphology, OR-in the strip text glyph
-    #    mask. We add it AFTER global morphology so glyphs aren't
-    #    re-collapsed into a contiguous bar — LaMa needs the
-    #    inter-letter pixels untouched to reconstruct the background.
+    body_coverage = body.sum() / 255 / total_px
+    logger.info("detector: body coverage=%.4f cam>%.2f", body_coverage, cam_threshold)
+
+    strip_path: Optional[str] = None
     if p_full >= strip_text_confidence:
-        strip_mask = _strip_text_mask(img_bgr)
-        refined = cv2.bitwise_or(refined, strip_mask)
+        strip = _strip_text_mask(img_bgr)
+        if strip.any():
+            strip_path = tempfile.mktemp(suffix="_strip.png", dir=str(TMP_DIR))
+            TMP_DIR.mkdir(exist_ok=True)
+            cv2.imwrite(strip_path, strip)
+            logger.info("detector: strip text glyph count > 0")
 
-    coverage = refined.sum() / 255 / total_px
-    logger.info("detector: coverage=%.4f cam>%.2f", coverage, cam_threshold)
-
-    if coverage < 0.0005 or coverage > 0.50:
-        logger.warning("detector: coverage out of plausible range, returning None")
+    if body_coverage > 0.50:
+        logger.warning("detector: body coverage > 50%%, returning None")
         return None
 
     TMP_DIR.mkdir(exist_ok=True)
-    out_path = tempfile.mktemp(suffix=".png", dir=str(TMP_DIR))
-    cv2.imwrite(out_path, refined)
-    return out_path
+    body_path = tempfile.mktemp(suffix="_body.png", dir=str(TMP_DIR))
+    cv2.imwrite(body_path, body)
+    return body_path, strip_path, p_full
+
+
+def prefill_strip(image_path: str, strip_mask_path: str, radius: int = 3) -> str:
+    """Use cv2.inpaint TELEA to fill the strip-text mask in-place.
+
+    Returns path to a new image with the strip text pixel-propagated
+    out. TELEA is a fast marching method that fills small regions by
+    propagating boundary pixels — perfect for thin text on a uniform
+    background, with no learned banner prior.
+    """
+    img = cv2.imread(image_path)
+    mask = cv2.imread(strip_mask_path, cv2.IMREAD_GRAYSCALE)
+    if img is None or mask is None:
+        return image_path
+    filled = cv2.inpaint(img, mask, radius, cv2.INPAINT_TELEA)
+    out = tempfile.mktemp(suffix="_prefilled.png", dir=str(TMP_DIR))
+    cv2.imwrite(out, filled)
+    return out
