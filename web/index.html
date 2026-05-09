@@ -11,6 +11,7 @@
     <div class="nav-brand">BC WatermarkRemover</div>
     <div class="nav-items">
       <button class="nav-item active" onclick="showPanel('upload')">Upload</button>
+      <button class="nav-item" onclick="showPanel('library')">Library</button>
       <button class="nav-item" onclick="showPanel('jobs')">Jobs</button>
       <button class="nav-item" onclick="showPanel('status')">Status</button>
     </div>
@@ -18,12 +19,14 @@
   <main>
     <div id="panel-upload" class="panel active"></div>
     <div id="panel-mask" class="panel"></div>
+    <div id="panel-library" class="panel"></div>
     <div id="panel-jobs" class="panel"></div>
     <div id="panel-status" class="panel"></div>
   </main>
   <script src="/static/js/app.js"></script>
   <script src="/static/js/upload.js"></script>
   <script src="/static/js/mask-editor.js"></script>
+  <script src="/static/js/library.js"></script>
   <script src="/static/js/job-dashboard.js"></script>
   <script src="/static/js/gpu-status.js"></script>
 </body>

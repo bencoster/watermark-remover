@@ -59,6 +59,23 @@ main { max-width: 1200px; margin: 1rem auto; padding: 0 1rem; }
 .progress-fill { height: 100%; background: #e94560; transition: width 0.3s; }
 .empty { color: #666; text-align: center; padding: 2rem; }
 
+/* Library */
+.library-header h2 { margin-bottom: 0.2rem; }
+.library-hint { color: #888; font-size: 0.85rem; margin-bottom: 1rem; }
+.library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+.library-card { background: #16213e; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.card-thumb-wrap { position: relative; aspect-ratio: 4/3; background: #0a0a1a; }
+.card-thumb { width: 100%; height: 100%; object-fit: cover; }
+.card-mask { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.55; mix-blend-mode: screen; }
+.card-body { padding: 0.6rem; }
+.card-name { width: 100%; background: transparent; color: #e0e0e0; border: 1px solid transparent; border-radius: 4px; padding: 0.2rem 0.3rem; font-size: 0.9rem; font-weight: 500; }
+.card-name:hover, .card-name:focus { background: #0f3460; border-color: #1f4480; outline: none; }
+.card-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; color: #888; font-size: 0.75rem; margin-top: 0.3rem; }
+.card-source { color: #666; font-size: 0.7rem; margin-top: 0.2rem; word-break: break-all; }
+.card-actions { display: flex; gap: 0.3rem; margin-top: 0.5rem; flex-wrap: wrap; }
+.badge { display: inline-block; padding: 0.05rem 0.4rem; border-radius: 8px; font-size: 0.65rem; }
+.badge-strip { background: #2d6a4f; color: #fff; }
+
 /* GPU status */
 .status-card { background: #16213e; border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem; }
 .status-card h3, .status-card h4 { margin-bottom: 0.5rem; }

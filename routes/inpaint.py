@@ -1,18 +1,76 @@
 """POST /api/inpaint - still image watermark removal via LaMa."""
 import asyncio
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
+import cv2
 from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse
 
 from services.model_manager import manager
 from services.lama_service import inpaint
+from jobs.store import connect
+from jobs import masks_store
 
 router = APIRouter()
 
 TMP_DIR = Path(__file__).parent.parent / "tmp"
+MASKS_DIR = masks_store.MASKS_DIR
+THUMBS_DIR = masks_store.THUMBS_DIR
+
+
+def _save_mask_to_library(
+    mask_path: str,
+    source_image_path: str,
+    source_filename: str,
+    p_full: float,
+    body_coverage: float,
+    has_strip: bool,
+) -> str:
+    """Copy a mask + render a thumbnail, persist the record, return the
+    mask id. Failures are logged but never bubble — the inpaint request
+    still succeeds even if library archiving doesn't."""
+    try:
+        MASKS_DIR.mkdir(parents=True, exist_ok=True)
+        THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+
+        mask_id = os.urandom(6).hex()
+        new_mask = MASKS_DIR / f"{mask_id}.png"
+        shutil.copy(mask_path, new_mask)
+
+        thumb_path = THUMBS_DIR / f"{mask_id}.jpg"
+        img = cv2.imread(source_image_path)
+        if img is not None:
+            h, w = img.shape[:2]
+            scale = 200 / max(h, w)
+            if scale < 1:
+                img = cv2.resize(img, (int(w * scale), int(h * scale)),
+                                 interpolation=cv2.INTER_AREA)
+            cv2.imwrite(str(thumb_path), img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        else:
+            thumb_path = None
+
+        conn = connect()
+        try:
+            masks_store.init_masks_table(conn)
+            saved_id, _ = masks_store.save_mask(
+                conn,
+                mask_path=str(new_mask),
+                thumb_path=str(thumb_path) if thumb_path else None,
+                source_filename=source_filename,
+                p_full=p_full,
+                body_coverage=body_coverage,
+                has_strip=has_strip,
+            )
+            return saved_id
+        finally:
+            conn.close()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("save_mask_to_library failed")
+        return ""
 
 
 @router.post("/api/inpaint")
@@ -87,6 +145,28 @@ async def auto_pipeline_endpoint(
                 status_code=422,
             )
         body_mask_path, strip_mask_path, p_full = result
+
+        # Combine body + strip into a single library entry for reuse.
+        combined_mask_path = body_mask_path
+        if strip_mask_path is not None:
+            combined = cv2.bitwise_or(
+                cv2.imread(body_mask_path, cv2.IMREAD_GRAYSCALE),
+                cv2.imread(strip_mask_path, cv2.IMREAD_GRAYSCALE),
+            )
+            combined_mask_path = tempfile.mktemp(suffix=".png", dir=str(TMP_DIR))
+            cv2.imwrite(combined_mask_path, combined)
+
+        body = cv2.imread(body_mask_path, cv2.IMREAD_GRAYSCALE)
+        body_coverage = float((body > 0).mean()) if body is not None else 0.0
+        await asyncio.to_thread(
+            _save_mask_to_library,
+            combined_mask_path,
+            img_tmp.name,
+            file.filename or "",
+            float(p_full),
+            body_coverage,
+            strip_mask_path is not None,
+        )
 
         image_for_lama = img_tmp.name
         body_mask_for_lama = body_mask_path

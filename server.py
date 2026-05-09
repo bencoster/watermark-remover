@@ -11,7 +11,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from routes import inpaint, video, detect, jobs, status
+from routes import inpaint, video, detect, jobs, status, masks
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,10 @@ async def lifespan(app: FastAPI):
     WEIGHTS_DIR.mkdir(exist_ok=True)
 
     from jobs.store import connect, init_db
+    from jobs.masks_store import init_masks_table
     conn = connect()
     init_db(conn)
+    init_masks_table(conn)
     conn.close()
 
     from services.model_manager import manager
@@ -69,6 +71,7 @@ app.include_router(inpaint.router)
 app.include_router(video.router)
 app.include_router(detect.router)
 app.include_router(jobs.router, prefix="/api/jobs")
+app.include_router(masks.router, prefix="/api/masks")
 app.include_router(status.router)
 
 
