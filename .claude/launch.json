@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "watermark-remover",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "8091"],
+      "port": 8091,
+      "env": {
+        "BC_WMR_DEVICE": "cpu",
+        "BC_WMR_AUTO_DOWNLOAD": "0"
+      }
+    }
+  ]
+}

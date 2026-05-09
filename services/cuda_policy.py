@@ -1,7 +1,13 @@
 """GPU device selection via NVML ctypes — no pynvml dependency.
 
-Picks the GPU with the most free VRAM. Skips GPU 1 (LLM card) on
-Ben's workstation. Falls back to CPU when no CUDA is available.
+Default is CPU — co-residency with the Imagine pool / LLM caused
+desktop freezes (see learning_gpu_allocation policy). To opt into
+GPU, set BC_WMR_DEVICE=auto (or cuda:N for a specific card).
+
+When auto-picking, skips GPUs listed in BC_WMR_SKIP_GPUS (default
+"0,1,3" — leaves only GPU 2 free for watermark-remover work, since
+0/2/3 are the Imagine pool and 1 is the LLM card). Override with an
+empty value to consider all GPUs.
 """
 from __future__ import annotations
 
@@ -13,7 +19,8 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-_SKIP_GPUS = {int(x) for x in os.environ.get("BC_WMR_SKIP_GPUS", "1").split(",") if x.strip().isdigit()}
+_DEVICE_PREF = os.environ.get("BC_WMR_DEVICE", "cpu").strip().lower()
+_SKIP_GPUS = {int(x) for x in os.environ.get("BC_WMR_SKIP_GPUS", "0,1,3").split(",") if x.strip().isdigit()}
 
 
 def _nvml_free_bytes() -> dict[int, int]:
@@ -46,6 +53,14 @@ def _nvml_free_bytes() -> dict[int, int]:
 
 def get_device() -> torch.device:
     """Pick the best available device."""
+    # Honour explicit override first.
+    if _DEVICE_PREF == "cpu":
+        logger.info("BC_WMR_DEVICE=cpu - using CPU")
+        return torch.device("cpu")
+    if _DEVICE_PREF.startswith("cuda:") and torch.cuda.is_available():
+        logger.info("BC_WMR_DEVICE=%s - using explicit GPU", _DEVICE_PREF)
+        return torch.device(_DEVICE_PREF)
+
     if not torch.cuda.is_available():
         logger.info("CUDA not available - using CPU")
         return torch.device("cpu")
@@ -53,7 +68,8 @@ def get_device() -> torch.device:
     n_gpus = torch.cuda.device_count()
     candidates = [i for i in range(n_gpus) if i not in _SKIP_GPUS]
     if not candidates:
-        candidates = list(range(n_gpus))
+        logger.warning("All GPUs are in skip-list - falling back to CPU")
+        return torch.device("cpu")
 
     free = _nvml_free_bytes()
     if free:
