@@ -105,17 +105,20 @@ async def inpaint_endpoint(
 async def auto_pipeline_endpoint(
     file: UploadFile = File(...),
     strip_mode: str = Form("inpaint"),
-    detect_mode: str = Form("recall"),
+    detect_mode: str = Form("auto"),
 ):
     """One-click watermark removal.
 
     Pipeline: classifier-gated detector → strip handling → LaMa body inpaint.
 
     `detect_mode`:
-      - "recall" (default) — use Grad-CAM heatmap directly. Best for
-        tiled watermarks (Dreamstime, Shutterstock) — catches every tile.
-      - "precision" — AND with low-saturation heuristic. Tighter mask,
-        better for single-watermark images where over-mask is risky.
+      - "auto" (default) — fit a 2D lattice to detected blobs. Tiled
+        pattern → recall; single mark → precision. Picks correctly for
+        stock photos and corner stamps without user input.
+      - "recall" — use Grad-CAM heatmap directly. Force this for tiled
+        watermarks (Dreamstime, Shutterstock) where auto isn't sure.
+      - "precision" — AND with low-saturation heuristic. Force this
+        for single-watermark images where over-mask is risky.
 
     `strip_mode` controls bottom solid-colour footer handling:
       - "inpaint" (default) — TELEA pre-fill, LaMa cleans rest.
@@ -126,9 +129,9 @@ async def auto_pipeline_endpoint(
             {"error": f"Invalid strip_mode: {strip_mode!r}. Use 'inpaint' or 'crop'."},
             status_code=400,
         )
-    if detect_mode not in ("recall", "precision"):
+    if detect_mode not in ("auto", "recall", "precision"):
         return JSONResponse(
-            {"error": f"Invalid detect_mode: {detect_mode!r}. Use 'recall' or 'precision'."},
+            {"error": f"Invalid detect_mode: {detect_mode!r}. Use 'auto', 'recall', or 'precision'."},
             status_code=400,
         )
 

@@ -22,9 +22,10 @@ function initUpload() {
         <button class="btn btn-danger" id="btnClearUpload">Clear</button>
       </div>
       <div class="strip-mode-toggle">
-        <span class="strip-mode-label" title="Tiled = repeating pattern across whole image (stock photos). Single = one isolated logo or stamp.">Watermark type:</span>
-        <label title="Best for stock photos with the watermark repeating in a grid (Dreamstime, Shutterstock, Getty). Catches every tile but masks ~50% of the image."><input type="radio" name="detectMode" value="recall" checked> Tiled / stock-photo grid</label>
-        <label title="Best for a single isolated watermark — corner stamp, one brand logo. Uses a tighter mask to avoid touching surrounding subject content."><input type="radio" name="detectMode" value="precision"> Single mark / corner stamp</label>
+        <span class="strip-mode-label" title="Auto picks based on whether the watermark forms a 2D grid. Override to force a specific mode if Auto picks wrong.">Watermark type:</span>
+        <label title="Detects whether the watermark is a tiled grid or a single mark and picks the right mode automatically."><input type="radio" name="detectMode" value="auto" checked> Auto-detect</label>
+        <label title="Force tiled / stock-photo mode (Dreamstime, Shutterstock, Getty). Catches every tile."><input type="radio" name="detectMode" value="recall"> Force tiled</label>
+        <label title="Force single mark / corner stamp mode. Tighter mask, won't catch tiled patterns."><input type="radio" name="detectMode" value="precision"> Force single</label>
       </div>
       <div class="strip-mode-toggle">
         <span class="strip-mode-label">Bottom strip bar:</span>
@@ -63,7 +64,7 @@ async function oneClickRemove() {
   const fd = new FormData();
   fd.append('file', _uploadedFile);
   const stripMode = (document.querySelector('input[name=stripMode]:checked') || {}).value || 'inpaint';
-  const detectMode = (document.querySelector('input[name=detectMode]:checked') || {}).value || 'recall';
+  const detectMode = (document.querySelector('input[name=detectMode]:checked') || {}).value || 'auto';
   fd.append('strip_mode', stripMode);
   fd.append('detect_mode', detectMode);
   showToast(`Removing watermark (${detectMode}, strip:${stripMode})... ~20s on CPU`);

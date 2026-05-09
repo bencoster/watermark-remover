@@ -26,7 +26,9 @@ from PIL import Image
 from services.cuda_policy import get_device
 from services.watermark_classifier import load_model as load_classifier, predict_batch
 from services.watermark_localizer import localize as gradcam_localize
-from services.lattice_completion import grid_complete
+from services.lattice_completion import (
+    grid_complete, _component_centroids, _vote_lattice_vectors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,12 +174,26 @@ def detect(
     return out_path
 
 
+def _is_tiled_pattern(cam_mask: np.ndarray) -> bool:
+    """Cheap test: does the CAM-thresholded mask look like a 2D tile grid?
+
+    We pull centroids from the connected components and ask the same
+    nearest-neighbour-vote routine the lattice completer uses to find
+    two generator vectors. If both are found AND the mask has at least
+    six components, the image has a periodic watermark pattern.
+    """
+    centroids = _component_centroids(cam_mask, min_area=20)
+    if len(centroids) < 6:
+        return False
+    return _vote_lattice_vectors(centroids) is not None
+
+
 def detect_split(
     image_path: str,
     cls_threshold: float = 0.30,
     cam_threshold: float = 0.08,
     strip_text_confidence: float = 0.70,
-    mode: str = "recall",
+    mode: str = "auto",
 ) -> Optional[tuple[str, Optional[str], float]]:
     """Detect watermark regions, returning (body_mask, strip_mask, p_full).
 
@@ -187,11 +203,14 @@ def detect_split(
     prior hallucinates colored bars when given thin horizontal masks.
 
     Modes:
-      - "recall" (default) — use Grad-CAM heatmap directly, low
-        threshold + dilation. Catches every watermark instance the
-        classifier attends to. Best for tiled stock-photo watermarks
-        where every tile must be removed. May over-mask slightly,
-        but LaMa handles that fine.
+      - "auto" (default) — fit a 2D lattice to the CAM blobs. If found
+        (tiled stock-photo watermark), run the recall path with grid
+        completion. Otherwise (single mark / corner stamp), run the
+        precision path.
+      - "recall" — use Grad-CAM heatmap directly, low threshold +
+        dilation. Catches every watermark instance the classifier
+        attends to. Best for tiled stock-photo watermarks. May
+        over-mask slightly, but LaMa handles that fine.
       - "precision" — AND the heatmap with a low-saturation/high-pass
         heuristic. Tighter mask, less over-coverage on subject content,
         but lower recall on weak/low-contrast watermarks.
@@ -224,6 +243,21 @@ def detect_split(
         p.requires_grad_(False)
 
     cam_mask = (heatmap > cam_threshold).astype(np.uint8) * 255
+
+    # Auto mode: pick precision vs recall by whether the CAM blobs form
+    # a 2D lattice. Tiled stock-photo watermarks → recall + grid.
+    # Single corner stamps / one-off logos → precision (tighter mask).
+    if mode == "auto":
+        # Use a quick dilation just for the lattice probe so connected
+        # components correspond to one logo each, not split fragments.
+        probe = cv2.dilate(
+            cam_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+            iterations=1,
+        )
+        chosen = "recall" if _is_tiled_pattern(probe) else "precision"
+        logger.info("auto mode -> %s (lattice %s)", chosen,
+                    "found" if chosen == "recall" else "absent")
+        mode = chosen
 
     if mode == "precision":
         # Tight mask via AND with low-saturation/edge heuristic.
