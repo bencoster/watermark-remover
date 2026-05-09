@@ -11,11 +11,10 @@ GPU-accelerated watermark removal for still images and video.
 
 ```bash
 pip install -r requirements.txt
-python download_models.py
 uvicorn server:app --host 0.0.0.0 --port 8090
 ```
 
-Visit `http://localhost:8090`.
+Visit `http://localhost:8090`. Model weights (~200MB) auto-download in the background on first run. Set `BC_WMR_AUTO_DOWNLOAD=0` to disable and download manually with `python download_models.py`.
 
 ## GPU Selection
 

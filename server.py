@@ -1,4 +1,6 @@
 """BC_WatermarkRemover — FastAPI entry point."""
+import asyncio
+import logging
 import os
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -11,10 +13,22 @@ from fastapi.responses import FileResponse
 
 from routes import inpaint, video, detect, jobs, status
 
+logger = logging.getLogger(__name__)
+
 PROJ_DIR = Path(__file__).parent
 WEB_DIR = PROJ_DIR / "web"
 WEIGHTS_DIR = PROJ_DIR / "weights"
 TMP_DIR = PROJ_DIR / "tmp"
+
+
+async def _auto_download_models():
+    """Download model weights on startup if missing. Runs off the event loop."""
+    try:
+        from download_models import download_all
+        await asyncio.to_thread(download_all)
+        logger.info("Model auto-download complete")
+    except Exception:
+        logger.exception("Model auto-download failed - first inference may stall")
 
 
 @asynccontextmanager
@@ -30,6 +44,11 @@ async def lifespan(app: FastAPI):
     from services.model_manager import manager
     from services.lama_service import load_model
     manager.register("lama", load_model)
+
+    # Kick off model download in the background — server stays responsive
+    # while big-lama.pt (~200MB) is fetched on first run.
+    if os.environ.get("BC_WMR_AUTO_DOWNLOAD", "1") != "0":
+        asyncio.create_task(_auto_download_models())
 
     from jobs.worker import start_worker
     start_worker()
