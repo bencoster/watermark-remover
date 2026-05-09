@@ -59,6 +59,26 @@ main { max-width: 1200px; margin: 1rem auto; padding: 0 1rem; }
 .progress-fill { height: 100%; background: #e94560; transition: width 0.3s; }
 .empty { color: #666; text-align: center; padding: 2rem; }
 
+/* Diff Mask */
+.diff-header h2 { margin-bottom: 0.2rem; }
+.diff-loaders { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 1rem 0; }
+.diff-loader { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.8rem; background: #16213e; border-radius: 8px; cursor: pointer; }
+.diff-loader > span { color: #ccc; font-weight: 500; }
+.diff-loader input[type=file] { color: #888; font-size: 0.85rem; }
+.diff-thumb { min-height: 100px; border-radius: 4px; background: #0a0a1a; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.diff-thumb img { max-width: 100%; max-height: 220px; }
+.diff-controls { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; padding: 0.8rem; background: #16213e; border-radius: 8px; margin: 1rem 0; }
+.diff-controls label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; color: #ccc; min-width: 180px; }
+.diff-controls label > span { color: #e94560; font-family: monospace; align-self: flex-end; font-size: 0.75rem; }
+.diff-controls input[type=range] { accent-color: #e94560; }
+.diff-controls select { background: #0f3460; color: #e0e0e0; border: 1px solid #1f4480; padding: 0.3rem; border-radius: 4px; }
+.diff-coverage { color: #888; font-size: 0.85rem; margin-left: auto; font-family: monospace; }
+.diff-stage { display: flex; flex-direction: column; gap: 0.8rem; }
+.diff-canvas-wrap { position: relative; max-width: 100%; overflow: hidden; border-radius: 8px; background: #0a0a1a; }
+.diff-canvas-wrap canvas { display: block; max-width: 100%; height: auto; }
+.diff-canvas-wrap canvas:nth-child(2) { position: absolute; top: 0; left: 0; pointer-events: none; }
+.diff-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
 /* Library */
 .library-header h2 { margin-bottom: 0.2rem; }
 .library-hint { color: #888; font-size: 0.85rem; margin-bottom: 1rem; }

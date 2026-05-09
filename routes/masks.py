@@ -1,7 +1,11 @@
-"""Mask library endpoints — list, fetch, rename, delete."""
+"""Mask library endpoints — list, fetch, rename, delete, import-from-diff."""
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+import cv2
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -9,6 +13,8 @@ from jobs.store import connect
 from jobs import masks_store
 
 router = APIRouter()
+
+TMP_DIR = Path(__file__).parent.parent / "tmp"
 
 
 class RenameRequest(BaseModel):
@@ -84,6 +90,74 @@ async def rename_mask_route(mask_id: str, body: RenameRequest):
         return JSONResponse({"id": mask_id, "name": name})
     finally:
         conn.close()
+
+
+@router.post("/from-diff")
+async def import_diff_mask(
+    mask: UploadFile = File(...),
+    source_image: UploadFile = File(...),
+):
+    """Persist a user-built diff mask to the library.
+
+    Caller (the JS diff-mask tool) computes the binary mask client-side
+    by differencing two aligned images. We just need to file it as a
+    library entry alongside a thumbnail of the source image.
+    """
+    TMP_DIR.mkdir(exist_ok=True)
+    masks_store.MASKS_DIR.mkdir(parents=True, exist_ok=True)
+    masks_store.THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+
+    mask_id = os.urandom(6).hex()
+    mask_path = masks_store.MASKS_DIR / f"{mask_id}.png"
+    thumb_path = masks_store.THUMBS_DIR / f"{mask_id}.jpg"
+
+    # Save the mask straight to the library folder
+    with open(mask_path, "wb") as f:
+        f.write(await mask.read())
+
+    # Build a thumbnail from the source image
+    src_tmp = tempfile.NamedTemporaryFile(
+        delete=False, suffix=Path(source_image.filename or "img.png").suffix, dir=str(TMP_DIR)
+    )
+    try:
+        src_tmp.write(await source_image.read())
+        src_tmp.close()
+        img = cv2.imread(src_tmp.name)
+        thumb_saved = None
+        if img is not None:
+            h, w = img.shape[:2]
+            scale = 200 / max(h, w)
+            if scale < 1:
+                img = cv2.resize(img, (int(w * scale), int(h * scale)),
+                                 interpolation=cv2.INTER_AREA)
+            cv2.imwrite(str(thumb_path), img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            thumb_saved = thumb_path
+
+        # Mask coverage stat from the saved file
+        m = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        coverage = float((m > 0).mean()) if m is not None else 0.0
+
+        conn = connect()
+        try:
+            masks_store.init_masks_table(conn)
+            saved_id, _ = masks_store.save_mask(
+                conn,
+                mask_path=str(mask_path),
+                thumb_path=str(thumb_saved) if thumb_saved else None,
+                source_filename=source_image.filename or "diff",
+                p_full=1.0,           # diff masks are user-supplied -> assume confident
+                body_coverage=coverage,
+                has_strip=False,
+            )
+            row = masks_store.get_mask(conn, saved_id)
+            return JSONResponse({"id": saved_id, "name": row["name"], "coverage": coverage})
+        finally:
+            conn.close()
+    finally:
+        try:
+            os.unlink(src_tmp.name)
+        except OSError:
+            pass
 
 
 @router.delete("/{mask_id}")

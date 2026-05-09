@@ -1,5 +1,5 @@
 const API = '';
-const NAV_ITEMS = ['upload', 'library', 'jobs', 'status'];
+const NAV_ITEMS = ['upload', 'diff', 'library', 'jobs', 'status'];
 
 function showPanel(name) {
   if (!NAV_ITEMS.includes(name) && name !== 'mask') name = 'upload';
@@ -9,6 +9,7 @@ function showPanel(name) {
   if (panel) panel.classList.add('active');
   const idx = NAV_ITEMS.indexOf(name);
   if (idx >= 0) document.querySelectorAll('.nav-item')[idx]?.classList.add('active');
+  if (name === 'diff') initDiffMask();
   if (name === 'library') initLibrary();
   if (name === 'jobs') initJobDashboard();
   if (name === 'status') initGpuStatus();
