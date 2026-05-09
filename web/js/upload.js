@@ -22,6 +22,11 @@ function initUpload() {
         <button class="btn btn-danger" id="btnClearUpload">Clear</button>
       </div>
       <div class="strip-mode-toggle">
+        <span class="strip-mode-label">Detection:</span>
+        <label><input type="radio" name="detectMode" value="recall" checked> Recall (tiled watermarks)</label>
+        <label><input type="radio" name="detectMode" value="precision"> Precision (single mark)</label>
+      </div>
+      <div class="strip-mode-toggle">
         <span class="strip-mode-label">Bottom strip bar:</span>
         <label><input type="radio" name="stripMode" value="inpaint" checked> Inpaint (rebuild content)</label>
         <label><input type="radio" name="stripMode" value="crop"> Crop (cut bar off)</label>
@@ -58,8 +63,10 @@ async function oneClickRemove() {
   const fd = new FormData();
   fd.append('file', _uploadedFile);
   const stripMode = (document.querySelector('input[name=stripMode]:checked') || {}).value || 'inpaint';
+  const detectMode = (document.querySelector('input[name=detectMode]:checked') || {}).value || 'recall';
   fd.append('strip_mode', stripMode);
-  showToast(`Removing watermark (strip: ${stripMode})... ~20s on CPU`);
+  fd.append('detect_mode', detectMode);
+  showToast(`Removing watermark (${detectMode}, strip:${stripMode})... ~20s on CPU`);
 
   try {
     const r = await fetch(API + '/api/auto', { method: 'POST', body: fd });

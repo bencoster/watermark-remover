@@ -174,8 +174,9 @@ def detect(
 def detect_split(
     image_path: str,
     cls_threshold: float = 0.30,
-    cam_threshold: float = 0.20,
+    cam_threshold: float = 0.10,
     strip_text_confidence: float = 0.70,
+    mode: str = "recall",
 ) -> Optional[tuple[str, Optional[str], float]]:
     """Detect watermark regions, returning (body_mask, strip_mask, p_full).
 
@@ -183,6 +184,16 @@ def detect_split(
     mask covers thin text glyphs at image borders and should be
     pre-inpainted with cv2.inpaint(TELEA) before LaMa — LaMa's banner
     prior hallucinates colored bars when given thin horizontal masks.
+
+    Modes:
+      - "recall" (default) — use Grad-CAM heatmap directly, low
+        threshold + dilation. Catches every watermark instance the
+        classifier attends to. Best for tiled stock-photo watermarks
+        where every tile must be removed. May over-mask slightly,
+        but LaMa handles that fine.
+      - "precision" — AND the heatmap with a low-saturation/high-pass
+        heuristic. Tighter mask, less over-coverage on subject content,
+        but lower recall on weak/low-contrast watermarks.
 
     Returns None when the image is classified clean.
     """
@@ -212,8 +223,20 @@ def detect_split(
         p.requires_grad_(False)
 
     cam_mask = (heatmap > cam_threshold).astype(np.uint8) * 255
-    pixel_mask = _heuristic_pixel_mask(img_bgr)
-    body = cv2.bitwise_and(cam_mask, pixel_mask)
+
+    if mode == "precision":
+        # Tight mask via AND with low-saturation/edge heuristic.
+        pixel_mask = _heuristic_pixel_mask(img_bgr)
+        body = cv2.bitwise_and(cam_mask, pixel_mask)
+    else:
+        # Recall mode: trust the classifier's attention. Drop very
+        # small specks (open) so isolated background noise doesn't
+        # explode mask coverage, then close & dilate as usual.
+        body = cv2.morphologyEx(
+            cam_mask, cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        )
+
     body = cv2.morphologyEx(
         body, cv2.MORPH_CLOSE,
         cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))

@@ -105,23 +105,30 @@ async def inpaint_endpoint(
 async def auto_pipeline_endpoint(
     file: UploadFile = File(...),
     strip_mode: str = Form("inpaint"),
+    detect_mode: str = Form("recall"),
 ):
     """One-click watermark removal.
 
     Pipeline: classifier-gated detector → strip handling → LaMa body inpaint.
 
-    `strip_mode` controls how the bottom solid-colour footer (e.g.
-    Dreamstime's blue bar with the URL/ID text) is handled:
-      - "inpaint" (default) — TELEA pre-fill the strip from the rows
-        above, then LaMa cleans body watermarks. Image dimensions
-        preserved.
-      - "crop" — physically crop the image just above the footer.
-        No hallucination risk, but image gets shorter. Falls back to
-        inpaint when the strip mask isn't a clean full-width bar.
+    `detect_mode`:
+      - "recall" (default) — use Grad-CAM heatmap directly. Best for
+        tiled watermarks (Dreamstime, Shutterstock) — catches every tile.
+      - "precision" — AND with low-saturation heuristic. Tighter mask,
+        better for single-watermark images where over-mask is risky.
+
+    `strip_mode` controls bottom solid-colour footer handling:
+      - "inpaint" (default) — TELEA pre-fill, LaMa cleans rest.
+      - "crop" — cut the image above the footer.
     """
     if strip_mode not in ("inpaint", "crop"):
         return JSONResponse(
             {"error": f"Invalid strip_mode: {strip_mode!r}. Use 'inpaint' or 'crop'."},
+            status_code=400,
+        )
+    if detect_mode not in ("recall", "precision"):
+        return JSONResponse(
+            {"error": f"Invalid detect_mode: {detect_mode!r}. Use 'recall' or 'precision'."},
             status_code=400,
         )
 
@@ -138,7 +145,7 @@ async def auto_pipeline_endpoint(
         img_tmp.write(await file.read())
         img_tmp.close()
 
-        result = await asyncio.to_thread(detect_split, img_tmp.name)
+        result = await asyncio.to_thread(detect_split, img_tmp.name, 0.30, 0.10, 0.70, detect_mode)
         if result is None:
             return JSONResponse(
                 {"detected": False, "message": "No watermark detected"},
