@@ -1,48 +1,42 @@
-# Watermark Remover Automatically
+# BC_WatermarkRemover
 
-## Tips
+GPU-accelerated watermark removal for still images and video.
 
-**If you want the source code, please exchange with your code. I am not the free worker of you.**
+- **Stills**: LaMa inpainting (big-lama JIT checkpoint)
+- **Video**: ProPainter temporal-consistent inpainting (stub - WIP)
+- **Detection**: Auto-detect watermark regions, manual mask fallback
+- **Web UI**: FastAPI + vanilla JS - upload, draw mask, download result
 
-**Please run with Python 3.6.5**
+## Quick Start
 
-## Result
+```bash
+pip install -r requirements.txt
+python download_models.py
+uvicorn server:app --host 0.0.0.0 --port 8090
+```
 
-### Result with demo images
+Visit `http://localhost:8090`.
 
-<div align=left><img width="200" height="360" src="https://github.com/whitelok/watermark-remover/blob/master/.resource/result.png?raw=true"/></div>
+## GPU Selection
 
-### Result with pratical images
+Automatically picks the GPU with the most free VRAM. Set `BC_WMR_SKIP_GPUS=1` to skip GPU 1 (default - reserved for LLM inference). Falls back to CPU when no CUDA is available.
 
-<div align=left><img width="668" height="372" src="https://github.com/whitelok/watermark-remover/blob/master/.resource/practical-result.png?raw=true"/></div>
+## API
 
-## Docker runtime [**Recommendation**]
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/inpaint` | POST | Still image inpainting (file + mask) |
+| `/api/video` | POST | Video inpainting job (file + mask, returns job ID) |
+| `/api/detect` | POST | Auto-detect watermark mask |
+| `/api/jobs/{id}` | GET | Poll job status |
+| `/api/jobs/{id}/result` | GET | Download completed result |
+| `/api/status` | GET | GPU info, loaded model |
 
- - docker pull whitelok/watermark-remover:v1.0
+## Status
 
-## Install
-
- 1. `cd watermark-remover; pip3 install -r requirements.txt`
- 2. Install opencv Python3 binding.(If you need, I can share one to you)
-
-## Usage
-
-### Demo
-  1. `bash train.sh` for training the watermark and alpha saving in result folder and remove watermark from original image.
-
-### Tips
-
- - Training tips
-  1. if the watermark free result is not good enough, you can change `--iters` (refer to train.sh)
-  2. if the training process is too long to wait, you can change `--watermark_threshold` (refer to train.sh)
-  3. if you get tk_inter error, you can change `--save_result` (refer to train.sh)
-
-### Customer
- 1. Put all watermarked images into one folder
- 2. python3 main_solver.pyc --path [watermarked images folder]
-
-## Progress and Implemented function
-
-<div align=left><img width="250" height="362" src="https://github.com/whitelok/watermark-remover/blob/master/.resource/progress.png?raw=true"/></div>
-
-
+- [x] Project scaffold
+- [x] LaMa still image inpainting
+- [x] Web UI with mask editor
+- [x] Job queue for async video processing
+- [ ] ProPainter video inpainting (model extraction WIP)
+- [ ] Watermark auto-detection (model integration WIP)
