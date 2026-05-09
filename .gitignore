@@ -3,6 +3,7 @@ __pycache__/
 *.egg-info/
 weights/
 tmp/
+masks/
 jobs.db
 jobs.db-wal
 jobs.db-shm
