@@ -174,7 +174,7 @@ def detect(
 def detect_split(
     image_path: str,
     cls_threshold: float = 0.30,
-    cam_threshold: float = 0.10,
+    cam_threshold: float = 0.08,
     strip_text_confidence: float = 0.70,
     mode: str = "recall",
 ) -> Optional[tuple[str, Optional[str], float]]:
@@ -228,23 +228,29 @@ def detect_split(
         # Tight mask via AND with low-saturation/edge heuristic.
         pixel_mask = _heuristic_pixel_mask(img_bgr)
         body = cv2.bitwise_and(cam_mask, pixel_mask)
-    else:
-        # Recall mode: trust the classifier's attention. Drop very
-        # small specks (open) so isolated background noise doesn't
-        # explode mask coverage, then close & dilate as usual.
+        # Modest cleanup for precision mode.
         body = cv2.morphologyEx(
-            cam_mask, cv2.MORPH_OPEN,
-            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+            body, cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))
         )
-
-    body = cv2.morphologyEx(
-        body, cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))
-    )
-    body = cv2.dilate(
-        body, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
-        iterations=2,
-    )
+        body = cv2.dilate(
+            body, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+            iterations=2,
+        )
+    else:
+        # Recall mode: trust the classifier's attention. Skip the
+        # open() step — for tiled stock-photo watermarks the diagonal
+        # text strokes between logo centers are thin (< 3px wide) and
+        # an open(3,3) erases them. Use a wider dilate so adjacent
+        # logo blobs link up along the text-stroke trail between them.
+        body = cv2.morphologyEx(
+            cam_mask, cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))
+        )
+        body = cv2.dilate(
+            body, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
+            iterations=2,
+        )
 
     body_coverage = body.sum() / 255 / total_px
     logger.info("detector: body coverage=%.4f cam>%.2f", body_coverage, cam_threshold)
@@ -258,8 +264,14 @@ def detect_split(
             cv2.imwrite(strip_path, strip)
             logger.info("detector: strip text glyph count > 0")
 
-    if body_coverage > 0.50:
-        logger.warning("detector: body coverage > 50%%, returning None")
+    # Coverage cap differs by mode. Recall mode (default) handles tiled
+    # stock-photo watermarks where 50-65% coverage is legitimate — the
+    # whole image is dotted with watermarks. Precision mode is tighter,
+    # so anything over 40% probably means a misdetection.
+    cov_cap = 0.65 if mode == "recall" else 0.40
+    if body_coverage > cov_cap:
+        logger.warning("detector: body coverage %.2f > %.2f cap (%s mode), returning None",
+                       body_coverage, cov_cap, mode)
         return None
 
     TMP_DIR.mkdir(exist_ok=True)
