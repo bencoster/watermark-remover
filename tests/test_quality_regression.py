@@ -35,7 +35,16 @@ import numpy as np
 FIXTURES = Path(__file__).parent / "fixtures"
 WATERMARKED = FIXTURES / "dreamstime_18829755_watermarked.jpg"
 REFERENCE = FIXTURES / "dreamstime_18829755_reference.jpg"
+GROUND_TRUTH_MASK = FIXTURES / "dreamstime_18829755_groundtruth_mask.png"
 WEIGHTS = ROOT / "weights" / "big-lama.pt"
+
+# Mask-quality thresholds — directly measure detector quality against
+# the diff mask between watermarked and watermarkremover.io's clean
+# version. This is a more direct signal than PSNR on the inpaint
+# output, which can hide detector recall issues behind a forgiving
+# inpaint texture.
+MIN_RECALL = 0.65   # fraction of GT pixels we cover (sensitivity)
+MIN_IOU = 0.22      # overall agreement
 
 # Body region = top 86% of the image. Both ours and the SaaS keep this
 # area; only the bottom 14% strip differs in handling.
@@ -136,6 +145,47 @@ def test_dreamstime_quality_regression():
 
     assert psnr >= MIN_PSNR_DB, f"PSNR {psnr:.2f} dB below baseline {MIN_PSNR_DB}"
     assert ssim >= MIN_SSIM, f"SSIM {ssim:.3f} below baseline {MIN_SSIM}"
+
+
+def test_detector_mask_iou_vs_groundtruth():
+    """Detect on the dreamstime fixture and compare the produced mask
+    against the diff-mask of the watermarkremover.io clean image. We
+    want both:
+      - high recall (we cover most of what the GT marks as watermark)
+      - acceptable IoU (we don't over-mask the subject too much)
+    """
+    from services.detector_service import detect_split
+
+    assert WATERMARKED.exists()
+    assert GROUND_TRUTH_MASK.exists()
+
+    result = detect_split(str(WATERMARKED), mode="auto")
+    assert result is not None
+    body_mask, strip_mask, _p = result
+
+    ours = cv2.imread(body_mask, cv2.IMREAD_GRAYSCALE)
+    if strip_mask is not None:
+        strip = cv2.imread(strip_mask, cv2.IMREAD_GRAYSCALE)
+        ours = cv2.bitwise_or(ours, strip)
+    gt = cv2.imread(str(GROUND_TRUTH_MASK), cv2.IMREAD_GRAYSCALE)
+    if ours.shape != gt.shape:
+        ours = cv2.resize(ours, (gt.shape[1], gt.shape[0]),
+                          interpolation=cv2.INTER_NEAREST)
+    ours_b = ours > 127
+    gt_b = gt > 127
+
+    inter = np.logical_and(ours_b, gt_b).sum()
+    union = np.logical_or(ours_b, gt_b).sum()
+    iou = float(inter / max(1, union))
+    recall = float(inter / max(1, gt_b.sum()))
+    precision = float(inter / max(1, ours_b.sum()))
+    print(f"\n  detector vs GT mask")
+    print(f"  Recall:    {recall:.3f}  (min {MIN_RECALL})")
+    print(f"  Precision: {precision:.3f}")
+    print(f"  IoU:       {iou:.3f}    (min {MIN_IOU})")
+
+    assert recall >= MIN_RECALL, f"recall {recall:.3f} below baseline {MIN_RECALL}"
+    assert iou >= MIN_IOU, f"IoU {iou:.3f} below baseline {MIN_IOU}"
 
 
 def test_ssim_implementation_sanity():

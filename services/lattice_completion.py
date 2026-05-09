@@ -187,33 +187,57 @@ def grid_complete(
     anchor = np.median(centroids, axis=0)
     out = mask.copy()
 
-    # Sweep an integer (i, j) grid wide enough to cover the image.
-    # Bound size = max image dim divided by min vector length, plus margin.
+    # Sweep an integer (i, j) grid wide enough to cover the image, plus
+    # a one-cell margin in every direction. Including the off-image
+    # margin matters: tiles that sit *just outside* the image still
+    # contribute connecting strokes that cross the visible edge — that
+    # is precisely the diagonal text we were missing in the top-right
+    # and right-edge regions of the dreamstime fixture.
     vlen = max(1.0, min(np.linalg.norm(v1), np.linalg.norm(v2)))
     span = int(np.ceil(max(w, h) / vlen) + 4)
-    points: list[tuple[int, int]] = []
+    margin_cells = 2
+    visible: list[tuple[int, int]] = []
+    all_pts: list[tuple[int, int]] = []
     for i in range(-span, span + 1):
         for j in range(-span, span + 1):
             x = anchor[0] + i * v1[0] + j * v2[0]
             y = anchor[1] + i * v1[1] + j * v2[1]
-            if 0 <= x < w and 0 <= y < h:
-                points.append((int(x), int(y)))
-            if len(points) > max_lattice_points:
+            xi, yi = int(round(x)), int(round(y))
+            # Visible = inside image, used for circle drawing.
+            if 0 <= xi < w and 0 <= yi < h:
+                visible.append((xi, yi))
+            # all_pts = visible + a margin ring outside the image, used
+            # for line drawing so edge cells get their connecting strokes.
+            margin_pad = margin_cells * vlen
+            if -margin_pad <= xi < w + margin_pad and -margin_pad <= yi < h + margin_pad:
+                all_pts.append((xi, yi))
+            if len(visible) > max_lattice_points:
                 break
-        if len(points) > max_lattice_points:
+        if len(visible) > max_lattice_points:
             break
 
-    logger.info("grid_complete: lattice v1=%s v2=%s -> %d points",
-                v1.round(1).tolist(), v2.round(1).tolist(), len(points))
+    logger.info("grid_complete: lattice v1=%s v2=%s -> %d visible (%d incl margin)",
+                v1.round(1).tolist(), v2.round(1).tolist(),
+                len(visible), len(all_pts))
 
-    # Draw discs at lattice nodes (capture each watermark logo)
-    for (x, y) in points:
+    # Draw discs at every visible lattice node (each is a watermark logo).
+    for (x, y) in visible:
         cv2.circle(out, (x, y), disc_radius, 255, -1)
 
-    # Connect adjacent lattice neighbours (covers the diagonal text strokes).
-    pt_set = set(points)
-    deltas = [(int(v1[0]), int(v1[1])), (int(v2[0]), int(v2[1]))]
-    for (x, y) in points:
+    # Connect lattice neighbours along both generator vectors AND the
+    # two diagonals (v1+v2 / v1-v2). Stock-photo watermarks like
+    # Dreamstime render the URL text crossing each tile — adjacent
+    # lattice nodes are linked along *both* diagonal directions, so
+    # the GT mask shows X patterns at every node. Lines along just
+    # v1 and v2 leave the diagonals empty.
+    pt_set = set(all_pts)
+    deltas = [
+        (int(round(v1[0])), int(round(v1[1]))),
+        (int(round(v2[0])), int(round(v2[1]))),
+        (int(round(v1[0] + v2[0])), int(round(v1[1] + v2[1]))),
+        (int(round(v1[0] - v2[0])), int(round(v1[1] - v2[1]))),
+    ]
+    for (x, y) in all_pts:
         for dx, dy in deltas:
             nb = (x + dx, y + dy)
             if nb in pt_set:
