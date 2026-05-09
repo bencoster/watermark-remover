@@ -152,6 +152,63 @@ def _vote_lattice_vectors(centroids: np.ndarray, n_neighbors: int = 6,
     return v1.astype(float), v2.astype(float)
 
 
+def connect_centroids(
+    mask: np.ndarray,
+    line_thickness: int | None = None,
+    n_neighbors: int = 6,
+    max_link_dist_factor: float = 1.6,
+) -> np.ndarray:
+    """Draw thick lines between each detected centroid and its nearest
+    neighbours. No prediction of new positions — uses ONLY the centroids
+    Grad-CAM already lit up, so we can't drift away from the real
+    watermark grid.
+
+    For tiled stock-photo watermarks the diagonal text strokes run
+    between adjacent logo centres; connecting those centres directly
+    captures those strokes without the linear drift that any anchored-
+    lattice prediction suffers far from its anchor.
+    """
+    centroids = _component_centroids(mask)
+    if len(centroids) < 4:
+        return mask
+
+    # Estimate a reasonable median nearest-neighbour distance — used
+    # both for the auto line thickness and as a maximum link distance
+    # so we don't accidentally connect across the whole image.
+    nn_dists = []
+    for c in centroids:
+        d = np.linalg.norm(centroids - c, axis=1)
+        d = d[d > 0]
+        if d.size:
+            nn_dists.append(np.min(d))
+    median_nn = float(np.median(nn_dists)) if nn_dists else 60.0
+
+    if line_thickness is None:
+        # ~5% of nearest-neighbour pitch — matches GT text-stroke width.
+        line_thickness = max(2, int(round(median_nn * 0.05)))
+
+    out = mask.copy()
+    max_link = median_nn * max_link_dist_factor
+    seen = set()
+    for c in centroids:
+        d = np.linalg.norm(centroids - c, axis=1)
+        order = np.argsort(d)[1:1 + n_neighbors]
+        cx, cy = int(c[0]), int(c[1])
+        for j in order:
+            if d[j] > max_link:
+                continue
+            nx, ny = int(centroids[j][0]), int(centroids[j][1])
+            key = (min(cx, nx), min(cy, ny), max(cx, nx), max(cy, ny))
+            if key in seen:
+                continue
+            seen.add(key)
+            cv2.line(out, (cx, cy), (nx, ny), 255, line_thickness)
+    logger.info("connect_centroids: %d centroids, median NN=%.0f, "
+                "thickness=%d, %d edges drawn",
+                len(centroids), median_nn, line_thickness, len(seen))
+    return out
+
+
 def grid_complete(
     mask: np.ndarray,
     image_bgr: Optional[np.ndarray] = None,

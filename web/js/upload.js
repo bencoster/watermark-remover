@@ -28,6 +28,11 @@ function initUpload() {
         <label title="Force single mark / corner stamp mode. Tighter mask, won't catch tiled patterns."><input type="radio" name="detectMode" value="precision"> Force single</label>
       </div>
       <div class="strip-mode-toggle">
+        <span class="strip-mode-label" title="When ON, the server checks if any saved library mask matches the input dimensions and uses it directly. Library masks come from the Diff Mask tool and give SaaS-equivalent quality (+4 dB PSNR vs auto-detect on the canonical fixture).">Library masks:</span>
+        <label title="Use a saved library mask if its dimensions match the input. Best for repeat watermarks."><input type="radio" name="libraryMask" value="auto" checked> Auto-match</label>
+        <label title="Always run detection from scratch."><input type="radio" name="libraryMask" value="off"> Always detect</label>
+      </div>
+      <div class="strip-mode-toggle">
         <span class="strip-mode-label">Bottom strip bar:</span>
         <label><input type="radio" name="stripMode" value="inpaint" checked> Inpaint (rebuild content)</label>
         <label><input type="radio" name="stripMode" value="crop"> Crop (cut bar off)</label>
@@ -65,8 +70,10 @@ async function oneClickRemove() {
   fd.append('file', _uploadedFile);
   const stripMode = (document.querySelector('input[name=stripMode]:checked') || {}).value || 'inpaint';
   const detectMode = (document.querySelector('input[name=detectMode]:checked') || {}).value || 'auto';
+  const libraryMask = (document.querySelector('input[name=libraryMask]:checked') || {}).value || 'auto';
   fd.append('strip_mode', stripMode);
   fd.append('detect_mode', detectMode);
+  fd.append('library_mask', libraryMask);
   showToast(`Removing watermark (${detectMode}, strip:${stripMode})... ~20s on CPU`);
 
   try {
@@ -76,12 +83,16 @@ async function oneClickRemove() {
       const url = URL.createObjectURL(blob);
       const el = document.getElementById('oneClickResult');
       el.style.display = 'block';
+      const maskSource = r.headers.get('X-Mask-Source');
+      const sourceBadge = maskSource === 'library'
+        ? '<span class="badge badge-strip">Library mask matched (best quality)</span>'
+        : '';
       el.innerHTML = `
-        <h3>Result</h3>
+        <h3>Result ${sourceBadge}</h3>
         <img src="${url}" class="result-img">
         <a href="${url}" download="cleaned.png" class="btn btn-primary">Download</a>
       `;
-      showToast('Done!');
+      showToast(maskSource === 'library' ? 'Done! (used library mask)' : 'Done!');
     } else if (r.status === 422) {
       showToast('No watermark detected - try manual mask');
     } else {

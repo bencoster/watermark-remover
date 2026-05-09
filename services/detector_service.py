@@ -27,7 +27,8 @@ from services.cuda_policy import get_device
 from services.watermark_classifier import load_model as load_classifier, predict_batch
 from services.watermark_localizer import localize as gradcam_localize
 from services.lattice_completion import (
-    grid_complete, _component_centroids, _vote_lattice_vectors,
+    grid_complete, connect_centroids,
+    _component_centroids, _vote_lattice_vectors,
 )
 
 logger = logging.getLogger(__name__)
@@ -315,19 +316,19 @@ def detect_split(
         # blobs (typical for tiled stock-photo watermarks), fit a 2D
         # lattice to the centroids and predict every missing tile +
         # connecting stroke. No-op when no lattice is detected.
-        # Tile geometry auto-scales from the detected lattice pitch,
-        # so the same grid_complete works at 0.25x..1.5x image sizes.
-        # We *revert* to the pre-lattice mask if grid completion would
-        # push coverage above the recall-mode cap — at non-canonical
-        # scales the lattice voter occasionally latches onto outlier
-        # offsets (purely horizontal, lattice-of-noise, etc.) and we'd
-        # rather ship a slightly-under-covered mask than a wildly
-        # over-masked one and fail outright.
+        # Connect each detected centroid to its nearest neighbours
+        # with thick lines. This captures the diagonal text strokes
+        # between adjacent watermark logos *without* predicting new
+        # positions — the IoU overlay against the GT diff mask shows
+        # that lattice prediction (anchor + integer grid) drifts
+        # increasingly far from real logo positions as you move away
+        # from the anchor, producing over-mask in wrong places. Using
+        # only the centroids Grad-CAM already found avoids that drift.
         body_pre = body.copy()
-        body = grid_complete(body, image_bgr=img_bgr)
+        body = connect_centroids(body)
         post_cov = float((body > 0).mean())
         if post_cov > 0.62:
-            logger.info("grid_complete inflated coverage to %.2f — reverting", post_cov)
+            logger.info("connect_centroids inflated coverage to %.2f — reverting", post_cov)
             body = body_pre
 
     body_coverage = body.sum() / 255 / total_px
