@@ -60,6 +60,7 @@ function initDiffMask() {
         <canvas id="diffCanvasMask"></canvas>
       </div>
       <div class="diff-actions">
+        <button class="btn btn-secondary" id="diffCompleteLinesBtn">Complete Partial Lines</button>
         <button class="btn btn-primary" id="diffSaveBtn">Save to Library</button>
         <button class="btn btn-secondary" id="diffApplyBtn">Apply (manual editor)</button>
         <button class="btn btn-secondary" id="diffDownloadBtn">Download PNG</button>
@@ -84,6 +85,49 @@ function initDiffMask() {
   document.getElementById('diffSaveBtn').addEventListener('click', saveDiffMask);
   document.getElementById('diffApplyBtn').addEventListener('click', applyDiffMaskToEditor);
   document.getElementById('diffDownloadBtn').addEventListener('click', downloadDiffMask);
+  document.getElementById('diffCompleteLinesBtn').addEventListener('click', completePartialLines);
+}
+
+async function completePartialLines() {
+  // Server-side: detect partial line segments in the current mask via
+  // Hough on the skeleton, then extend each one along its own slope to
+  // span the bounding box of nearby co-linear pixels. Returns a new
+  // mask with the gaps filled. Works much better in OpenCV than in JS.
+  if (!_diff.lastMaskBin) { showToast('Adjust sliders first'); return; }
+  const blob = await _maskBinToBlob();
+  const fd = new FormData();
+  fd.append('mask', blob, 'mask.png');
+  showToast('Completing lines...');
+  try {
+    const r = await fetch(API + '/api/masks/complete-lines', { method: 'POST', body: fd });
+    if (!r.ok) { showToast('Complete failed: ' + r.status); return; }
+    const out = await r.blob();
+    // Re-load the completed mask back into the canvas + overlay.
+    const im = new Image();
+    im.onload = () => {
+      const w = _diff.canvasMask.width, h = _diff.canvasMask.height;
+      const tmp = document.createElement('canvas');
+      tmp.width = w; tmp.height = h;
+      tmp.getContext('2d').drawImage(im, 0, 0, w, h);
+      const data = tmp.getContext('2d').getImageData(0, 0, w, h).data;
+      const updated = new Uint8ClampedArray(w * h);
+      for (let p = 0, q = 0; p < updated.length; p++, q += 4) {
+        updated[p] = data[q] > 127 ? 255 : 0;
+      }
+      _diff.lastMaskBin = updated;
+      // Repaint translucent red overlay
+      const rgba = new Uint8ClampedArray(w * h * 4);
+      let count = 0;
+      for (let p = 0, q = 0; p < updated.length; p++, q += 4) {
+        if (updated[p]) { rgba[q]=255; rgba[q+1]=64; rgba[q+2]=64; rgba[q+3]=140; count++; }
+      }
+      _diff.ctxMask.putImageData(new ImageData(rgba, w, h), 0, 0);
+      const cov = (count / (w*h) * 100).toFixed(1);
+      document.getElementById('diffCoverage').textContent = `Coverage: ${cov}% (lines completed)`;
+      showToast('Lines completed');
+    };
+    im.src = URL.createObjectURL(out);
+  } catch (e) { showToast('Error: ' + e.message); }
 }
 
 function loadDiffImage(file, slot) {

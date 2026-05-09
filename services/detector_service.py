@@ -26,6 +26,7 @@ from PIL import Image
 from services.cuda_policy import get_device
 from services.watermark_classifier import load_model as load_classifier, predict_batch
 from services.watermark_localizer import localize as gradcam_localize
+from services.lattice_completion import grid_complete
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +257,12 @@ def detect_split(
             body, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
             iterations=2,
         )
+        # Lattice completion: if Grad-CAM produced a regular grid of
+        # blobs (typical for tiled stock-photo watermarks), fit a 2D
+        # lattice to the centroids and predict every missing tile +
+        # connecting stroke. No-op when no lattice is detected.
+        body = grid_complete(body, image_bgr=img_bgr,
+                             disc_radius=14, line_thickness=5)
 
     body_coverage = body.sum() / 255 / total_px
     logger.info("detector: body coverage=%.4f cam>%.2f", body_coverage, cam_threshold)

@@ -92,6 +92,41 @@ async def rename_mask_route(mask_id: str, body: RenameRequest):
         conn.close()
 
 
+@router.post("/complete-lines")
+async def complete_lines_route(
+    mask: UploadFile = File(...),
+    extend_px: int = 35,
+    stroke_thickness: int = 6,
+):
+    """Extend partial line segments in a mask along their detected slope.
+
+    Useful when a diff or auto-detect captured most of a tiled watermark
+    pattern but skipped weak strokes between logos. Returns the completed
+    mask as PNG.
+    """
+    from services.lattice_completion import complete_lines
+
+    TMP_DIR.mkdir(exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=str(TMP_DIR))
+    try:
+        tmp.write(await mask.read())
+        tmp.close()
+        img = cv2.imread(tmp.name, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise HTTPException(status_code=400, detail="Cannot read mask image")
+        completed = complete_lines(
+            img, extend_px=extend_px, stroke_thickness=stroke_thickness
+        )
+        out_path = tempfile.mktemp(suffix=".png", dir=str(TMP_DIR))
+        cv2.imwrite(out_path, completed)
+        return FileResponse(out_path, media_type="image/png")
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
 @router.post("/from-diff")
 async def import_diff_mask(
     mask: UploadFile = File(...),
