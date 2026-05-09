@@ -41,3 +41,50 @@ async def inpaint_endpoint(
                 os.unlink(p)
             except OSError:
                 pass
+
+
+@router.post("/api/auto")
+async def auto_pipeline_endpoint(
+    file: UploadFile = File(...),
+):
+    """One-click watermark removal: classifier-gated detector +
+    TELEA strip pre-fill + LaMa body inpaint. Returns the cleaned
+    image, or a 422 JSON when the classifier says the image is clean.
+    """
+    from services.detector_service import detect_split, prefill_strip
+
+    TMP_DIR.mkdir(exist_ok=True)
+    img_tmp = tempfile.NamedTemporaryFile(
+        delete=False, suffix=Path(file.filename or "img.png").suffix, dir=str(TMP_DIR)
+    )
+
+    try:
+        img_tmp.write(await file.read())
+        img_tmp.close()
+
+        result = await asyncio.to_thread(detect_split, img_tmp.name)
+        if result is None:
+            return JSONResponse(
+                {"detected": False, "message": "No watermark detected"},
+                status_code=422,
+            )
+        body_mask_path, strip_mask_path, p_full = result
+
+        image_for_lama = img_tmp.name
+        if strip_mask_path is not None:
+            image_for_lama = await asyncio.to_thread(
+                prefill_strip, img_tmp.name, strip_mask_path, 4
+            )
+
+        model = manager.get("lama")
+        result_path = await asyncio.to_thread(
+            inpaint, image_for_lama, body_mask_path, manager.device, model
+        )
+        return FileResponse(result_path, media_type="image/png", filename="cleaned.png")
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        try:
+            os.unlink(img_tmp.name)
+        except OSError:
+            pass

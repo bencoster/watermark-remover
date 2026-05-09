@@ -16,10 +16,12 @@ function initUpload() {
         <video id="previewVid" controls style="display:none"></video>
       </div>
       <div class="preview-actions">
-        <button class="btn btn-primary" id="btnAutoDetect">Auto-Detect Watermark</button>
+        <button class="btn btn-primary" id="btnOneClick">One-Click Remove</button>
+        <button class="btn btn-secondary" id="btnAutoDetect">Review Mask First</button>
         <button class="btn btn-secondary" id="btnManualMask">Draw Mask Manually</button>
         <button class="btn btn-danger" id="btnClearUpload">Clear</button>
       </div>
+      <div id="oneClickResult" class="result-preview" style="display:none"></div>
     </div>
   `;
 
@@ -36,9 +38,43 @@ function initUpload() {
   });
   input.addEventListener('change', () => { if (input.files.length) handleFile(input.files[0]); });
 
+  document.getElementById('btnOneClick').addEventListener('click', oneClickRemove);
   document.getElementById('btnAutoDetect').addEventListener('click', autoDetect);
   document.getElementById('btnManualMask').addEventListener('click', () => openMaskEditor());
   document.getElementById('btnClearUpload').addEventListener('click', clearUpload);
+}
+
+async function oneClickRemove() {
+  if (!_uploadedFile) return;
+  if (_uploadedType === 'video') {
+    showToast('Video one-click not supported yet - use mask editor');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', _uploadedFile);
+  showToast('Removing watermark... (~20s on CPU)');
+
+  try {
+    const r = await fetch(API + '/api/auto', { method: 'POST', body: fd });
+    if (r.ok) {
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const el = document.getElementById('oneClickResult');
+      el.style.display = 'block';
+      el.innerHTML = `
+        <h3>Result</h3>
+        <img src="${url}" class="result-img">
+        <a href="${url}" download="cleaned.png" class="btn btn-primary">Download</a>
+      `;
+      showToast('Done!');
+    } else if (r.status === 422) {
+      showToast('No watermark detected - try manual mask');
+    } else {
+      showToast('Error: ' + r.status);
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
 }
 
 function handleFile(file) {
