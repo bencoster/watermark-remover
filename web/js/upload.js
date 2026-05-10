@@ -74,7 +74,7 @@ function initUpload() {
         <span class="strip-mode-label" title="SAM 2 over-segments tiled stock-photo watermarks (it isolates each logo but misses the diagonal text between them). Recommended only for single-mark / corner-stamp images. SAM 3.1 may handle tiled cases better but requires Python 3.12 + Meta access request.">Mask refinement (advanced):</span>
         <label title="No SAM refinement. Default Grad-CAM blob mask."><input type="radio" name="samRefine" value="off" checked> Off (default)</label>
         <label title="SAM 2 with per-centroid point prompts. Best for single watermarks. WARNING: drops recall on tiled stock-photo watermarks."><input type="radio" name="samRefine" value="sam2"> SAM 2 (single-mark only)</label>
-        <label title="Text-prompted SAM 3.1. Multi-instance native — likely the best for tiled patterns. Requires (1) HF access — visit huggingface.co/facebook/sam3.1 and click 'Agree and access repository', then `hf auth login`. (2) Python 3.12+ venv with `pip install -e git+https://github.com/facebookresearch/sam3.git`. Falls back to Off when unavailable."><input type="radio" name="samRefine" value="sam3.1"> SAM 3.1 (gated — see tooltip)</label>
+        <label title="Text-prompted SAM 3.1. Multi-instance native — likely the best for tiled patterns. Requires (1) HF access — visit huggingface.co/facebook/sam3.1 and click Agree and access repository, then run hf auth login. (2) Python 3.12+ venv with transformers>=5. Falls back to Off when unavailable."><input type="radio" name="samRefine" value="sam3.1"> SAM 3.1 (gated — see tooltip)</label>
       </div>
       <div id="oneClickResult" class="result-preview" style="display:none"></div>
       <div id="batchResults" class="batch-results"></div>
