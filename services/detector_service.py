@@ -309,13 +309,22 @@ def detect_split(
             iterations=2,
         )
 
-    # Optional Grounding DINO refinement — empirically lifts IoU
-    # from 0.25 to 0.31 on the canonical fixture by combining GD's
-    # high-recall-but-loose box mask (97% recall, 25% precision) with
-    # the existing low-saturation/high-pass pixel heuristic to land
-    # on tighter pixel boundaries inside the GD-confirmed regions.
-    # Off by default — adds ~4 s on CPU + first-run download of
-    # IDEA-Research/grounding-dino-base (~700 MB).
+    # Optional Grounding DINO refinement.
+    #
+    # Bench reported IoU 0.31 with 7×7 dilate ×2 (vs 0.25 baseline),
+    # but visually the result was much WORSE than the metric suggested
+    # (user reported melted faces, distorted limbs). The IoU metric
+    # rewards *covering* the GT, but LaMa quality drops sharply when
+    # we hand it a mask substantially larger than the actual watermark
+    # pixels, because LaMa hallucinates texture for everything inside
+    # the mask boundary. The 7×7 ×2 dilation pushed coverage to ~32%
+    # which is enough to make LaMa lose the local subject context.
+    #
+    # Tuned down to 3×3 ×1 — narrower mask, mild precision/recall
+    # hit on the metric, but visually clean output. Also DON'T OR with
+    # the CAM body mask — replace it. The CAM blobs add coverage GD
+    # missed but they're at slightly-wrong centres and that misalign-
+    # ment is the over-mask that hurts inpaint. Trust GD's high recall.
     if use_grounding_dino:
         try:
             from services.grounding_dino_service import detect_box_mask
@@ -325,16 +334,12 @@ def detect_split(
                 refined = cv2.bitwise_and(gd_box, pixel_mask)
                 refined = cv2.dilate(
                     refined,
-                    cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)),
-                    iterations=2,
+                    cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+                    iterations=1,
                 )
-                # Union with the CAM/body mask we already computed —
-                # take the better of the two per pixel. CAM gives recall
-                # at the borders the GD box may have missed; the GD ∩
-                # heuristic gives precision in the body. OR is the
-                # right combiner here.
-                body = cv2.bitwise_or(body, refined)
-                logger.info("grounding-dino refinement applied")
+                # Replace, don't OR — see comment above.
+                body = refined
+                logger.info("grounding-dino refinement applied (replace, 3x3 dilate)")
             else:
                 logger.info("grounding-dino: no detections — keeping CAM body mask")
         except Exception:

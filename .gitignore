@@ -9,4 +9,6 @@ jobs.db-wal
 jobs.db-shm
 .env
 venv/
+.venv/
+.venv-*/
 .pytest_cache/

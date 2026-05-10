@@ -92,6 +92,39 @@ async def rename_mask_route(mask_id: str, body: RenameRequest):
         conn.close()
 
 
+@router.post("/purge-auto")
+async def purge_auto_saved_masks():
+    """Delete every library entry that wasn't user-blessed.
+
+    Diff Mask saves use p_full=1.0 (the user explicitly built and
+    saved the mask). Auto-detection saves use the classifier score
+    (typically 0.97 for watermarked images). This endpoint removes
+    everything in the second category — the polluted-library issue
+    that was causing the auto-match short-circuit to pull inferior
+    masks.
+
+    Also drops rows whose mask file is missing on disk.
+    """
+    conn = connect()
+    try:
+        masks_store.init_masks_table(conn)
+        rows = masks_store.list_masks(conn, limit=1000)
+        removed = 0
+        kept = 0
+        for r in rows:
+            path = r["mask_path"]
+            user_blessed = float(r["p_full"] or 0) >= 0.999
+            file_missing = not (path and os.path.exists(path))
+            if user_blessed and not file_missing:
+                kept += 1
+                continue
+            if masks_store.delete_mask(conn, r["id"]):
+                removed += 1
+        return JSONResponse({"removed": removed, "kept": kept})
+    finally:
+        conn.close()
+
+
 @router.post("/complete-lines")
 async def complete_lines_route(
     mask: UploadFile = File(...),

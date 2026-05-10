@@ -309,7 +309,7 @@ function updateBatchCard(item) {
     const tag = item.maskSource === 'library'
       ? '<span class="badge badge-strip" title="Used a saved library mask">library</span>'
       : '';
-    status.innerHTML = `Done in ${(item.elapsedMs / 1000).toFixed(1)}s ${tag} <a href="${item.resultUrl}" download="cleaned_${escapeAttr(item.file.name)}.png" class="btn btn-sm btn-primary">Download</a>`;
+    status.innerHTML = `Done in ${(item.elapsedMs / 1000).toFixed(1)}s ${tag} <button class="btn btn-sm btn-secondary" onclick="openBeforeAfter('${URL.createObjectURL(item.file)}', '${item.resultUrl}', { fileName: 'cleaned_${escapeAttr(item.file.name)}'})">Compare</button> <a href="${item.resultUrl}" download="cleaned_${escapeAttr(item.file.name)}.png" class="btn btn-sm btn-primary">Download</a>`;
     const thumb = card.querySelector('.batch-card-thumb');
     thumb.src = item.resultUrl;
     thumb.title = 'Click to compare original / result';

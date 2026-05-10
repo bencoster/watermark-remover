@@ -130,14 +130,21 @@ async def inpaint_endpoint(
 
 def _find_matching_library_mask(image_path: str, tolerance: float = 0.05) -> str | None:
     """Find a saved library mask whose dimensions are within `tolerance`
-    of the input image. Returns the local mask file path if a candidate
-    exists. We rank by recency — newest matches first.
+    of the input image.
 
-    Why this matters: when a user has built a perfect diff mask for a
-    Dreamstime layout once, the next Dreamstime image at that resolution
-    can reach ~28 dB PSNR vs the SaaS reference (vs ~24 dB from auto
-    detect). The simple dimension match is the cheapest way to get
-    that without per-image manual work.
+    Ranking (most-preferred first):
+      1. User-blessed masks (p_full == 1.0, set by the Diff Mask
+         workflow which saves user-validated diffs).
+      2. Among user-blessed: smaller body_coverage first (tighter
+         masks generally inpaint better — less LaMa hallucination
+         surface area).
+      3. Then auto-detected masks, newest first.
+
+    The previous implementation just took the newest dimensional match.
+    Once the library accumulated auto-saved detection masks from many
+    iteration runs, that newest-wins rule was returning inferior masks
+    (cov=0.32 from a GD-augmented run) instead of the user's perfect
+    GT diff mask (cov=0.23). Hence the regression the user saw.
     """
     img = cv2.imread(image_path)
     if img is None:
@@ -151,6 +158,7 @@ def _find_matching_library_mask(image_path: str, tolerance: float = 0.05) -> str
     finally:
         conn.close()
 
+    candidates = []
     for row in rows:
         path = row["mask_path"]
         if not path or not os.path.exists(path):
@@ -161,11 +169,35 @@ def _find_matching_library_mask(image_path: str, tolerance: float = 0.05) -> str
         mh, mw = m.shape
         if mh == 0 or mw == 0:
             continue
-        # Within tolerance both dimensions
-        if abs(mh - target_h) / max(target_h, 1) <= tolerance and \
-           abs(mw - target_w) / max(target_w, 1) <= tolerance:
-            return path
-    return None
+        if (abs(mh - target_h) / max(target_h, 1) <= tolerance and
+                abs(mw - target_w) / max(target_w, 1) <= tolerance):
+            candidates.append({
+                "path": path,
+                "p_full": float(row["p_full"] or 0),
+                "coverage": float(row["body_coverage"] or 0),
+                "created_at": row["created_at"] or "",
+            })
+    if not candidates:
+        return None
+
+    # User-blessed (p_full == 1.0) first, then by smallest coverage,
+    # then by newest. p_full == 1.0 is the Diff Mask save marker;
+    # detection saves use the classifier score (typically 0.97 for
+    # watermarked images).
+    candidates.sort(key=lambda c: (
+        0 if c["p_full"] >= 0.999 else 1,
+        c["coverage"],
+        -ord_str_safe(c["created_at"]),
+    ))
+    return candidates[0]["path"]
+
+
+def ord_str_safe(s: str) -> int:
+    # Compact, monotonic-by-time hash for sorting iso timestamps.
+    try:
+        return int("".join(ch for ch in s if ch.isdigit())[:14] or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 @router.post("/api/auto")
@@ -294,17 +326,16 @@ async def auto_pipeline_endpoint(
             combined_mask_path = tempfile.mktemp(suffix=".png", dir=str(TMP_DIR))
             cv2.imwrite(combined_mask_path, combined)
 
+        # NOTE: previously we auto-saved every detection result to the
+        # library. That polluted the library with inferior auto-detected
+        # masks, and the auto-match short-circuit then preferred those
+        # over the user-blessed diff masks (which produce ~28 dB PSNR
+        # vs ~24 dB from auto-detect). The library is now exclusively
+        # populated by the Diff Mask workflow — masks the user has
+        # explicitly approved as ground truth for a layout.
+        # body coverage is still computed for the response telemetry only.
         body = cv2.imread(body_mask_path, cv2.IMREAD_GRAYSCALE)
         body_coverage = float((body > 0).mean()) if body is not None else 0.0
-        await asyncio.to_thread(
-            _save_mask_to_library,
-            combined_mask_path,
-            img_tmp.name,
-            file.filename or "",
-            float(p_full),
-            body_coverage,
-            strip_mask_path is not None,
-        )
 
         image_for_lama = img_tmp.name
         body_mask_for_lama = body_mask_path

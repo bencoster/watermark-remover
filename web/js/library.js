@@ -3,7 +3,10 @@ function initLibrary() {
   panel.innerHTML = `
     <div class="library-header">
       <h2>Mask Library</h2>
-      <p class="library-hint">Auto-saved masks from /api/auto runs. Rename, delete, or apply to a new image.</p>
+      <p class="library-hint">User-built diff masks. Auto-match in the Upload tab uses these to short-circuit detection on repeat watermark layouts.</p>
+      <div class="library-actions">
+        <button class="btn btn-sm btn-danger" onclick="purgeAutoMasks()" title="Remove all auto-saved detection masks (keeps user-blessed Diff Mask saves). Use this if Auto-match keeps picking the wrong mask.">Clean auto-saved masks</button>
+      </div>
     </div>
     <div id="libraryGrid" class="library-grid">Loading...</div>
   `;
@@ -79,6 +82,17 @@ function renderLibrary(masks) {
       }
     });
   });
+}
+
+async function purgeAutoMasks() {
+  if (!confirm('Remove every auto-saved detection mask? Diff Mask saves (user-blessed) are kept.')) return;
+  try {
+    const r = await fetch(API + '/api/masks/purge-auto', { method: 'POST' });
+    if (!r.ok) { showToast('Purge failed: ' + r.status); return; }
+    const data = await r.json();
+    showToast(`Removed ${data.removed}, kept ${data.kept} user-blessed`);
+    loadLibrary();
+  } catch (e) { showToast('Purge error: ' + e.message); }
 }
 
 async function deleteMaskFromLibrary(id) {
