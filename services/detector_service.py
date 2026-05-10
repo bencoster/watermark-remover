@@ -27,7 +27,6 @@ from services.cuda_policy import get_device
 from services.watermark_classifier import load_model as load_classifier, predict_batch
 from services.watermark_localizer import localize as gradcam_localize
 from services.lattice_completion import (
-    grid_complete, connect_centroids,
     _component_centroids, _vote_lattice_vectors,
 )
 
@@ -298,38 +297,25 @@ def detect_split(
         )
     else:
         # Recall mode: trust the classifier's attention. Skip the
-        # open() step — for tiled stock-photo watermarks the diagonal
-        # text strokes between logo centers are thin (< 3px wide) and
-        # an open(3,3) erases them. Modest dilation only — the lattice
-        # completion below adds the connecting strokes so we don't
-        # need wide pre-dilation here. Wider pre-dilation just inflates
-        # over-mask coverage on subject content without helping recall.
+        # Use the Grad-CAM heatmap directly as the body mask, with
+        # only morphological cleanup. Earlier iterations tried
+        # augmenting the mask with predicted lattice nodes + connecting
+        # diagonal strokes (grid_complete / connect_centroids) to
+        # capture the text strokes between logo centres in tiled
+        # watermarks. Both approaches over-masked subject content
+        # (lattice anchored points drift; centroid connections pulled
+        # lines through hands/shorts) and never delivered a clear
+        # quality gain — the library-mask short-circuit closed the
+        # remaining gap on repeat watermarks instead. Auto-detect path
+        # is now plain CAM + morphology.
         body = cv2.morphologyEx(
             cam_mask, cv2.MORPH_CLOSE,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))
         )
         body = cv2.dilate(
-            body, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
-            iterations=1,
+            body, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+            iterations=2,
         )
-        # Lattice completion: if Grad-CAM produced a regular grid of
-        # blobs (typical for tiled stock-photo watermarks), fit a 2D
-        # lattice to the centroids and predict every missing tile +
-        # connecting stroke. No-op when no lattice is detected.
-        # Connect each detected centroid to its nearest neighbours
-        # with thick lines. This captures the diagonal text strokes
-        # between adjacent watermark logos *without* predicting new
-        # positions — the IoU overlay against the GT diff mask shows
-        # that lattice prediction (anchor + integer grid) drifts
-        # increasingly far from real logo positions as you move away
-        # from the anchor, producing over-mask in wrong places. Using
-        # only the centroids Grad-CAM already found avoids that drift.
-        body_pre = body.copy()
-        body = connect_centroids(body)
-        post_cov = float((body > 0).mean())
-        if post_cov > 0.62:
-            logger.info("connect_centroids inflated coverage to %.2f — reverting", post_cov)
-            body = body_pre
 
     body_coverage = body.sum() / 255 / total_px
     logger.info("detector: body coverage=%.4f cam>%.2f", body_coverage, cam_threshold)
@@ -343,11 +329,12 @@ def detect_split(
             cv2.imwrite(strip_path, strip)
             logger.info("detector: strip text glyph count > 0")
 
-    # Coverage cap differs by mode. Recall mode (default) handles tiled
-    # stock-photo watermarks where 50-65% coverage is legitimate — the
-    # whole image is dotted with watermarks. Precision mode is tighter,
-    # so anything over 40% probably means a misdetection.
-    cov_cap = 0.65 if mode == "recall" else 0.40
+    # Coverage cap differs by mode. Recall mode handles tiled
+    # stock-photo watermarks where 50-70% coverage is legitimate — the
+    # whole image is dotted with watermarks, and at smaller scales the
+    # CAM blobs occupy a larger fraction of the image. Precision mode
+    # is tighter, so anything over 40% probably means a misdetection.
+    cov_cap = 0.70 if mode == "recall" else 0.40
     if body_coverage > cov_cap:
         logger.warning("detector: body coverage %.2f > %.2f cap (%s mode), returning None",
                        body_coverage, cov_cap, mode)
