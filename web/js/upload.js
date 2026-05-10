@@ -66,9 +66,10 @@ function initUpload() {
         <label title="Diffusion-based texture synthesis. Better on bars covering carpet/wood/sky. Needs GPU."><input type="radio" name="stripEngine" value="sdxl"> Quality (SDXL)</label>
       </div>
       <div class="strip-mode-toggle">
-        <span class="strip-mode-label" title="Grounding DINO is the only multi-instance text-prompted detector that handles tiled stock-photo watermarks (97% recall vs 64% for the default detector). When enabled, GD's loose bounding boxes are intersected with the existing pixel heuristic to give tight pixel masks. ~4 s extra on CPU, ~700 MB first-run download.">Tiled-pattern detector:</span>
-        <label title="Default ConvNeXt + Grad-CAM only. Faster, no extra download."><input type="radio" name="groundingDino" value="off" checked> Off (default)</label>
-        <label title="Add Grounding DINO refinement. Best for tiled stock-photo watermarks. Empirically improves IoU 0.25 -> 0.31 on the canonical fixture."><input type="radio" name="groundingDino" value="on"> On (Grounding DINO)</label>
+        <span class="strip-mode-label" title="Multi-instance text-prompted detectors for tiled stock-photo watermarks. Bench results on the canonical fixture: SAM 3 hybrid IoU 0.337, GD IoU 0.310, default ConvNeXt+CAM IoU 0.248. Both options need ~2-7 GB first-run model downloads.">Tiled-pattern detector:</span>
+        <label title="Default ConvNeXt + Grad-CAM only. Fast, no extra download."><input type="radio" name="tiledDetector" value="off" checked> Off (default)</label>
+        <label title="SAM 3 hybrid: precise per-instance masks OR-d with loose-AND-pixel + dilate. Highest precision (0.50) and IoU (0.337) measured. Needs HF auth for facebook/sam3 + transformers>=5; ~2 GB first-run download."><input type="radio" name="tiledDetector" value="sam3"> SAM 3 hybrid (best — needs auth)</label>
+        <label title="Grounding DINO ∩ pixel-heuristic + 3x3 dilate. IoU 0.310. Apache-2.0, no auth gate; ~700 MB first-run download."><input type="radio" name="tiledDetector" value="grounding_dino"> Grounding DINO</label>
       </div>
       <div class="strip-mode-toggle">
         <span class="strip-mode-label" title="SAM 2 over-segments tiled stock-photo watermarks (it isolates each logo but misses the diagonal text between them). Recommended only for single-mark / corner-stamp images. SAM 3.1 may handle tiled cases better but requires Python 3.12 + Meta access request.">Mask refinement (advanced):</span>
@@ -231,7 +232,9 @@ async function oneClickRemove() {
   const libraryMask = (document.querySelector('input[name=libraryMask]:checked') || {}).value || 'auto';
   const stripEngine = (document.querySelector('input[name=stripEngine]:checked') || {}).value || 'telea';
   const samRefine = (document.querySelector('input[name=samRefine]:checked') || {}).value || 'off';
-  const groundingDino = (document.querySelector('input[name=groundingDino]:checked') || {}).value || 'off';
+  const tiledDetector = (document.querySelector('input[name=tiledDetector]:checked') || {}).value || 'off';
+  // Legacy boolean kept for backwards compat; server will prefer tiled_detector.
+  const groundingDino = tiledDetector === 'grounding_dino' ? 'on' : 'off';
 
   const batchEl = document.getElementById('batchResults');
   batchEl.innerHTML = '';
@@ -256,6 +259,7 @@ async function oneClickRemove() {
     fd.append('strip_engine', stripEngine);
     fd.append('sam_refine', samRefine);
     fd.append('grounding_dino', groundingDino);
+    fd.append('tiled_detector', tiledDetector);
 
     const t0 = performance.now();
     try {

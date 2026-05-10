@@ -213,6 +213,7 @@ def detect_split(
     strip_text_confidence: float = 0.70,
     mode: str = "auto",
     use_grounding_dino: bool = False,
+    tiled_detector: str = "off",
 ) -> Optional[tuple[str, Optional[str], float]]:
     """Detect watermark regions, returning (body_mask, strip_mask, p_full).
 
@@ -325,7 +326,33 @@ def detect_split(
     # the CAM body mask — replace it. The CAM blobs add coverage GD
     # missed but they're at slightly-wrong centres and that misalign-
     # ment is the over-mask that hurts inpaint. Trust GD's high recall.
-    if use_grounding_dino:
+    # Optional multi-instance text-prompted detector. Replaces the
+    # CAM body mask when one fires successfully — both candidates
+    # below outperform CAM on bench (precision-driven masks → cleaner
+    # LaMa output). 'tiled_detector' is a string enum:
+    #   'off'            — keep CAM body mask
+    #   'sam3'           — SAM 3 hybrid (precise OR loose∩pixel + dilate).
+    #                      Best metric: IoU 0.337 on the canonical
+    #                      fixture. Needs HF auth + transformers>=5.
+    #   'grounding_dino' — Grounding DINO ∩ pixel + dilate.
+    #                      IoU 0.310 on canonical, no HF gate.
+    #
+    # The legacy `use_grounding_dino` bool maps to tiled_detector =
+    # 'grounding_dino' for backwards compatibility.
+    if use_grounding_dino and tiled_detector == "off":
+        tiled_detector = "grounding_dino"
+
+    if tiled_detector == "sam3":
+        try:
+            from services.sam3_service import detect_hybrid_mask as _sam3_detect
+            pixel_mask = _heuristic_pixel_mask(img_bgr)
+            sam3_mask = _sam3_detect(img_bgr, get_device(), pixel_mask=pixel_mask)
+            if sam3_mask.any():
+                body = sam3_mask
+                logger.info("sam3 hybrid detector applied")
+        except Exception:
+            logger.exception("sam3 detector failed; keeping CAM body mask")
+    elif tiled_detector == "grounding_dino":
         try:
             from services.grounding_dino_service import detect_box_mask
             gd_box = detect_box_mask(img_bgr, get_device())
@@ -337,7 +364,6 @@ def detect_split(
                     cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
                     iterations=1,
                 )
-                # Replace, don't OR — see comment above.
                 body = refined
                 logger.info("grounding-dino refinement applied (replace, 3x3 dilate)")
             else:

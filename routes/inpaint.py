@@ -209,6 +209,7 @@ async def auto_pipeline_endpoint(
     strip_engine: str = Form("telea"),
     sam_refine: str = Form("off"),
     grounding_dino: str = Form("off"),
+    tiled_detector: str = Form("off"),
 ):
     """One-click watermark removal.
 
@@ -257,6 +258,12 @@ async def auto_pipeline_endpoint(
             {"error": f"Invalid grounding_dino: {grounding_dino!r}. Use 'off' or 'on'."},
             status_code=400,
         )
+    if tiled_detector not in ("off", "sam3", "grounding_dino"):
+        return JSONResponse(
+            {"error": f"Invalid tiled_detector: {tiled_detector!r}. "
+                      "Use 'off', 'sam3', or 'grounding_dino'."},
+            status_code=400,
+        )
 
     from services.detector_service import (
         detect_split, prefill_strip, crop_strip, crop_strip_mask,
@@ -291,7 +298,7 @@ async def auto_pipeline_endpoint(
 
         result = await asyncio.to_thread(
             detect_split, img_tmp.name, 0.30, 0.10, 0.70, detect_mode,
-            grounding_dino == "on",
+            grounding_dino == "on", tiled_detector,
         )
         if result is None:
             return JSONResponse(

@@ -72,15 +72,24 @@ def main():
     gt = cv2.imread(str(GT_MASK), cv2.IMREAD_GRAYSCALE)
     pil = Image.open(str(WATERMARKED)).convert("RGB")
 
-    print("Loading SAM 3.1 (facebook/sam3.1) ...")
+    # facebook/sam3.1 ships only sam3.1_multiplex.pt — that needs
+    # the GitHub `sam3` package's custom loader. facebook/sam3 has
+    # model.safetensors which transformers.Sam3Model loads natively
+    # at the cost of skipping the 3.1 multiplex improvements.
+    repo = os.environ.get("SAM3_REPO", "facebook/sam3")
+    print(f"Loading {repo} ...")
     from transformers import Sam3Model, Sam3Processor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float16 if device.type == "cuda" else torch.float32
     print(f"  device={device}, dtype={dtype}")
     t0 = time.time()
-    processor = Sam3Processor.from_pretrained("facebook/sam3.1")
-    model = Sam3Model.from_pretrained("facebook/sam3.1", torch_dtype=dtype).to(device).eval()
+    processor = Sam3Processor.from_pretrained(repo)
+    model = Sam3Model.from_pretrained(repo, torch_dtype=dtype).to(device).eval()
     print(f"  loaded in {time.time() - t0:.1f}s")
+
+    score_threshold = float(os.environ.get("SAM3_SCORE_THR", "0.05"))
+    mask_threshold = float(os.environ.get("SAM3_MASK_THR", "0.50"))
+    print(f"  score_threshold={score_threshold}, mask_threshold={mask_threshold}")
 
     rows = []
     for prompt in PROMPTS:
@@ -93,9 +102,11 @@ def main():
             with torch.inference_mode():
                 outputs = model(**inputs)
             elapsed = time.time() - t0
+            # target_sizes must be a list of (h, w) tuples — passing a
+            # tensor here triggers a torch upsample_bilinear2d type error.
             results = processor.post_process_instance_segmentation(
-                outputs, threshold=0.30, mask_threshold=0.50,
-                target_sizes=torch.tensor([[pil.height, pil.width]], device=device),
+                outputs, threshold=score_threshold, mask_threshold=mask_threshold,
+                target_sizes=[(pil.height, pil.width)],
             )[0]
             masks_t = results.get("masks")
             n = 0 if masks_t is None else len(masks_t)
@@ -124,7 +135,7 @@ def main():
 
     print("\nReference baselines on this fixture:")
     print("  Current  (ConvNeXt + Grad-CAM)    IoU 0.248  recall 0.637")
-    print("  GD ∩ pixel + dilate (live)        IoU 0.310  recall 0.549")
+    print("  GD AND pixel + dilate (live)      IoU 0.310  recall 0.549")
 
 
 if __name__ == "__main__":
