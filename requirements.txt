@@ -11,3 +11,7 @@ httpx
 timm>=0.6.12
 huggingface-hub>=0.16
 Pillow>=9.0
+# Optional — only needed for SDXL strip-bar inpaint engine
+diffusers>=0.30
+transformers>=4.40
+accelerate>=0.30

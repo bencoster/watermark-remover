@@ -37,6 +37,11 @@ function initUpload() {
         <label><input type="radio" name="stripMode" value="inpaint" checked> Inpaint (rebuild content)</label>
         <label><input type="radio" name="stripMode" value="crop"> Crop (cut bar off)</label>
       </div>
+      <div class="strip-mode-toggle">
+        <span class="strip-mode-label" title="SDXL re-synthesises plausible texture under the strip bar; TELEA only propagates colour from the rows above. SDXL needs ~11 GB free VRAM and adds ~15 s on GPU; falls back to TELEA when unavailable.">Strip refill engine:</span>
+        <label title="Fast pixel-propagation. Works without GPU."><input type="radio" name="stripEngine" value="telea" checked> Fast (TELEA)</label>
+        <label title="Diffusion-based texture synthesis. Better on bars covering carpet/wood/sky. Needs GPU."><input type="radio" name="stripEngine" value="sdxl"> Quality (SDXL)</label>
+      </div>
       <div id="oneClickResult" class="result-preview" style="display:none"></div>
     </div>
   `;
@@ -71,9 +76,11 @@ async function oneClickRemove() {
   const stripMode = (document.querySelector('input[name=stripMode]:checked') || {}).value || 'inpaint';
   const detectMode = (document.querySelector('input[name=detectMode]:checked') || {}).value || 'auto';
   const libraryMask = (document.querySelector('input[name=libraryMask]:checked') || {}).value || 'auto';
+  const stripEngine = (document.querySelector('input[name=stripEngine]:checked') || {}).value || 'telea';
   fd.append('strip_mode', stripMode);
   fd.append('detect_mode', detectMode);
   fd.append('library_mask', libraryMask);
+  fd.append('strip_engine', stripEngine);
   showToast(`Removing watermark (${detectMode}, strip:${stripMode})... ~20s on CPU`);
 
   try {

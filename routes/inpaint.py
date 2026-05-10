@@ -150,6 +150,7 @@ async def auto_pipeline_endpoint(
     strip_mode: str = Form("inpaint"),
     detect_mode: str = Form("auto"),
     library_mask: str = Form("auto"),
+    strip_engine: str = Form("telea"),
 ):
     """One-click watermark removal.
 
@@ -181,6 +182,11 @@ async def auto_pipeline_endpoint(
     if library_mask not in ("auto", "off"):
         return JSONResponse(
             {"error": f"Invalid library_mask: {library_mask!r}. Use 'auto' or 'off'."},
+            status_code=400,
+        )
+    if strip_engine not in ("telea", "sdxl"):
+        return JSONResponse(
+            {"error": f"Invalid strip_engine: {strip_engine!r}. Use 'telea' or 'sdxl'."},
             status_code=400,
         )
 
@@ -258,6 +264,39 @@ async def auto_pipeline_endpoint(
                     )
                 else:
                     # No clean full-width bar -> fall back to TELEA.
+                    image_for_lama = await asyncio.to_thread(
+                        prefill_strip, img_tmp.name, strip_mask_path, 4
+                    )
+            elif strip_engine == "sdxl":
+                # SDXL second pass on the strip region only — gives
+                # plausible texture continuation where TELEA produces
+                # smudgy gradients. Falls back to TELEA on any failure
+                # (model download issue, OOM, etc.) so a strip is
+                # always handled even if SDXL is unavailable.
+                from services import sdxl_inpaint_service
+                ok, why = sdxl_inpaint_service.is_available(manager.device)
+                if ok:
+                    try:
+                        manager.unload_all()  # free LaMa VRAM before SDXL
+                        pipe = await asyncio.to_thread(
+                            sdxl_inpaint_service.load_pipeline, manager.device
+                        )
+                        image_for_lama = await asyncio.to_thread(
+                            sdxl_inpaint_service.inpaint_strip_region,
+                            img_tmp.name, strip_mask_path, pipe,
+                        )
+                        # Free SDXL VRAM so LaMa body pass can reload.
+                        del pipe
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        logger.exception("SDXL strip pass failed; falling back to TELEA")
+                        image_for_lama = await asyncio.to_thread(
+                            prefill_strip, img_tmp.name, strip_mask_path, 4
+                        )
+                else:
+                    logger.warning("SDXL skipped: %s", why)
                     image_for_lama = await asyncio.to_thread(
                         prefill_strip, img_tmp.name, strip_mask_path, 4
                     )
