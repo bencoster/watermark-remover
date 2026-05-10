@@ -59,14 +59,20 @@ def is_available(engine: str = "sam2") -> tuple[bool, str]:
             return False, (
                 f"SAM 3.1 requires Python 3.12+ (you have "
                 f"{sys.version_info.major}.{sys.version_info.minor}). "
-                f"Create a project-local venv and install per "
-                f"https://github.com/facebookresearch/sam3"
+                "Set up a project-local venv: `python3.12 -m venv .venv-sam3` "
+                "then `.venv-sam3\\Scripts\\activate`."
             )
         try:
-            from sam3 import build_sam3  # noqa: F401
+            from sam3 import build_sam3_image_predictor  # noqa: F401
         except ImportError:
-            return False, "pip install -e git+https://github.com/facebookresearch/sam3.git#egg=sam3"
-        return True, "sam3.1 installed"
+            return False, (
+                "Run: `git clone https://github.com/facebookresearch/sam3.git && "
+                "cd sam3 && pip install -e .` "
+                "Also: visit https://huggingface.co/facebook/sam3.1, click "
+                "'Agree and access repository', then `hf auth login` with a "
+                "token that has access."
+            )
+        return True, "sam3.1 installed and authenticated"
     return False, f"unknown engine: {engine}"
 
 
@@ -160,13 +166,36 @@ def refine_with_sam2(
 
 def refine_with_sam3(
     image_bgr: np.ndarray,
-    text_prompt: str = "watermark logo text overlay",
+    text_prompt: str = "watermark. logo. text overlay.",
     device: torch.device | None = None,
 ) -> np.ndarray:
     """Text-prompt-driven refinement via SAM 3.1.
 
-    Not yet active — gated behind `is_available('sam3.1')`. The
-    expected call would build the predictor, run with `text=...`, and
+    Gate state (2026-05-10):
+      - Checkpoint at facebook/sam3.1 is `gated=manual` on HF — visit
+        https://huggingface.co/facebook/sam3.1 in a browser, click
+        "Agree and access repository", wait for Meta approval, then
+        `hf auth login` with a token that has read access to it.
+      - Inference code requires Python 3.12+ + PyTorch 2.7+ from
+        https://github.com/facebookresearch/sam3 — install with
+        `pip install -e .` after `git clone`. CUDA 12.6 minimum.
+
+    The expected call once both gates clear (this is the official
+    pattern from the SAM 3 README):
+
+        from sam3 import build_sam3_image_predictor
+        predictor = build_sam3_image_predictor(checkpoint=..., device=device)
+        state = predictor.set_image(image_bgr)
+        out = predictor.set_text_prompt(state=state, prompt=text_prompt)
+        masks, boxes, scores = out["masks"], out["boxes"], out["scores"]
+
+    Multi-instance is native — one prompt returns N masks, one per
+    instance. This is the property that defeated SAM 2 (per-point) and
+    Florence-2 (single-detection-per-concept). Expected to outperform
+    Grounding DINO + heuristic on tiled stock-photo watermarks because
+    SAM 3.1 returns *masks*, not just boxes.
+
+    NotImplementedError until you have access + Python 3.12 venv:
     union all returned instance masks.
     """
     raise NotImplementedError(
