@@ -176,6 +176,7 @@ async def auto_pipeline_endpoint(
     library_mask: str = Form("auto"),
     strip_engine: str = Form("telea"),
     sam_refine: str = Form("off"),
+    grounding_dino: str = Form("off"),
 ):
     """One-click watermark removal.
 
@@ -219,6 +220,11 @@ async def auto_pipeline_endpoint(
             {"error": f"Invalid sam_refine: {sam_refine!r}. Use 'off', 'sam2', or 'sam3.1'."},
             status_code=400,
         )
+    if grounding_dino not in ("off", "on"):
+        return JSONResponse(
+            {"error": f"Invalid grounding_dino: {grounding_dino!r}. Use 'off' or 'on'."},
+            status_code=400,
+        )
 
     from services.detector_service import (
         detect_split, prefill_strip, crop_strip, crop_strip_mask,
@@ -251,7 +257,10 @@ async def auto_pipeline_endpoint(
                 resp.headers["X-Mask-Source"] = "library"
                 return resp
 
-        result = await asyncio.to_thread(detect_split, img_tmp.name, 0.30, 0.10, 0.70, detect_mode)
+        result = await asyncio.to_thread(
+            detect_split, img_tmp.name, 0.30, 0.10, 0.70, detect_mode,
+            grounding_dino == "on",
+        )
         if result is None:
             return JSONResponse(
                 {"detected": False, "message": "No watermark detected"},
