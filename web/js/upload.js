@@ -42,6 +42,12 @@ function initUpload() {
         <label title="Fast pixel-propagation. Works without GPU."><input type="radio" name="stripEngine" value="telea" checked> Fast (TELEA)</label>
         <label title="Diffusion-based texture synthesis. Better on bars covering carpet/wood/sky. Needs GPU."><input type="radio" name="stripEngine" value="sdxl"> Quality (SDXL)</label>
       </div>
+      <div class="strip-mode-toggle">
+        <span class="strip-mode-label" title="SAM refines the rough Grad-CAM body mask into precise per-instance masks. NOTE: tested empirically and SAM 2 over-segments tiled stock-photo watermarks (it isolates each logo but misses the diagonal text between them). Recommended only for single-mark / corner-stamp images. SAM 3.1 (with text prompts) may handle tiled cases better but requires Python 3.12 + Meta access request.">Mask refinement (advanced):</span>
+        <label title="No SAM refinement. Default Grad-CAM blob mask."><input type="radio" name="samRefine" value="off" checked> Off (default)</label>
+        <label title="SAM 2 with per-centroid point prompts. Best for single watermarks. WARNING: drops recall on tiled stock-photo watermarks because it segments only the logo, not the surrounding text."><input type="radio" name="samRefine" value="sam2"> SAM 2 (single-mark only)</label>
+        <label title="Text-prompted SAM 3.1. Requires Python 3.12 venv + Meta checkpoint access. Falls back to Off when unavailable."><input type="radio" name="samRefine" value="sam3.1"> SAM 3.1 (when available)</label>
+      </div>
       <div id="oneClickResult" class="result-preview" style="display:none"></div>
     </div>
   `;
@@ -77,10 +83,12 @@ async function oneClickRemove() {
   const detectMode = (document.querySelector('input[name=detectMode]:checked') || {}).value || 'auto';
   const libraryMask = (document.querySelector('input[name=libraryMask]:checked') || {}).value || 'auto';
   const stripEngine = (document.querySelector('input[name=stripEngine]:checked') || {}).value || 'telea';
+  const samRefine = (document.querySelector('input[name=samRefine]:checked') || {}).value || 'off';
   fd.append('strip_mode', stripMode);
   fd.append('detect_mode', detectMode);
   fd.append('library_mask', libraryMask);
   fd.append('strip_engine', stripEngine);
+  fd.append('sam_refine', samRefine);
   showToast(`Removing watermark (${detectMode}, strip:${stripMode})... ~20s on CPU`);
 
   try {

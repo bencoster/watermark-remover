@@ -151,6 +151,7 @@ async def auto_pipeline_endpoint(
     detect_mode: str = Form("auto"),
     library_mask: str = Form("auto"),
     strip_engine: str = Form("telea"),
+    sam_refine: str = Form("off"),
 ):
     """One-click watermark removal.
 
@@ -187,6 +188,11 @@ async def auto_pipeline_endpoint(
     if strip_engine not in ("telea", "sdxl"):
         return JSONResponse(
             {"error": f"Invalid strip_engine: {strip_engine!r}. Use 'telea' or 'sdxl'."},
+            status_code=400,
+        )
+    if sam_refine not in ("off", "sam2", "sam3.1"):
+        return JSONResponse(
+            {"error": f"Invalid sam_refine: {sam_refine!r}. Use 'off', 'sam2', or 'sam3.1'."},
             status_code=400,
         )
 
@@ -228,6 +234,22 @@ async def auto_pipeline_endpoint(
                 status_code=422,
             )
         body_mask_path, strip_mask_path, p_full = result
+
+        # Optional SAM refinement of the body mask. SAM consumes the
+        # rough Grad-CAM blob mask + image and produces precise per-
+        # instance masks (one per watermark logo). On any failure the
+        # service returns the rough mask unchanged.
+        if sam_refine != "off":
+            from services import sam_refine_service
+            src = cv2.imread(img_tmp.name)
+            rough = cv2.imread(body_mask_path, cv2.IMREAD_GRAYSCALE)
+            refined = await asyncio.to_thread(
+                sam_refine_service.refine, src, rough, manager.device, sam_refine
+            )
+            if refined is not None and refined is not rough:
+                refined_path = tempfile.mktemp(suffix="_sam.png", dir=str(TMP_DIR))
+                cv2.imwrite(refined_path, refined)
+                body_mask_path = refined_path
 
         # Combine body + strip into a single library entry for reuse.
         combined_mask_path = body_mask_path
