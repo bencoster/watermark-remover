@@ -23,16 +23,29 @@ TMP_DIR = Path(__file__).parent.parent / "tmp"
 MASKS_DIR = masks_store.MASKS_DIR
 THUMBS_DIR = masks_store.THUMBS_DIR
 SAMPLE_IMAGE = Path(__file__).parent.parent / "tests" / "fixtures" / "dreamstime_18829755_watermarked.jpg"
+SAMPLE_CLEAN_IMAGE = Path(__file__).parent.parent / "tests" / "fixtures" / "dreamstime_18829755_reference.jpg"
 
 
 @router.get("/api/sample-image")
 async def sample_image():
-    """Serve the canonical test fixture for default-load on page open.
-    Lets the user try the pipeline immediately without an upload."""
+    """Serve the canonical watermarked test fixture for default-load
+    on page open. Lets the user try the pipeline immediately without
+    needing to upload anything."""
     if SAMPLE_IMAGE.exists():
         return FileResponse(str(SAMPLE_IMAGE), media_type="image/jpeg",
                             filename="sample.jpg")
     return JSONResponse({"error": "sample not found"}, status_code=404)
+
+
+@router.get("/api/sample-clean-image")
+async def sample_clean_image():
+    """Serve the SaaS-cleaned reference of the canonical fixture.
+    Used by the Diff Mask tab as the default image B so the diff
+    workflow can be exercised end-to-end without manual uploads."""
+    if SAMPLE_CLEAN_IMAGE.exists():
+        return FileResponse(str(SAMPLE_CLEAN_IMAGE), media_type="image/jpeg",
+                            filename="sample_clean.jpg")
+    return JSONResponse({"error": "clean sample not found"}, status_code=404)
 
 
 def _save_mask_to_library(

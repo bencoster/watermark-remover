@@ -86,6 +86,27 @@ function initDiffMask() {
   document.getElementById('diffApplyBtn').addEventListener('click', applyDiffMaskToEditor);
   document.getElementById('diffDownloadBtn').addEventListener('click', downloadDiffMask);
   document.getElementById('diffCompleteLinesBtn').addEventListener('click', completePartialLines);
+
+  // Default-load both fixtures so the diff workflow runs end-to-end
+  // without the user needing to upload anything. This matches the
+  // Upload tab's behaviour where the watermarked sample is preloaded.
+  loadDefaultDiffSamples();
+}
+
+async function loadDefaultDiffSamples() {
+  try {
+    const [rA, rB] = await Promise.all([
+      fetch(API + '/api/sample-image'),
+      fetch(API + '/api/sample-clean-image'),
+    ]);
+    if (!rA.ok || !rB.ok) return;
+    const blobA = await rA.blob();
+    const blobB = await rB.blob();
+    const fileA = new File([blobA], 'dreamstime_watermarked.jpg', { type: blobA.type });
+    const fileB = new File([blobB], 'dreamstime_clean.jpg', { type: blobB.type });
+    loadDiffImage(fileA, 'A');
+    loadDiffImage(fileB, 'B');
+  } catch (e) { /* silent — user can still upload */ }
 }
 
 async function completePartialLines() {
