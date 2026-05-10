@@ -22,6 +22,17 @@ router = APIRouter()
 TMP_DIR = Path(__file__).parent.parent / "tmp"
 MASKS_DIR = masks_store.MASKS_DIR
 THUMBS_DIR = masks_store.THUMBS_DIR
+SAMPLE_IMAGE = Path(__file__).parent.parent / "tests" / "fixtures" / "dreamstime_18829755_watermarked.jpg"
+
+
+@router.get("/api/sample-image")
+async def sample_image():
+    """Serve the canonical test fixture for default-load on page open.
+    Lets the user try the pipeline immediately without an upload."""
+    if SAMPLE_IMAGE.exists():
+        return FileResponse(str(SAMPLE_IMAGE), media_type="image/jpeg",
+                            filename="sample.jpg")
+    return JSONResponse({"error": "sample not found"}, status_code=404)
 
 
 def _save_mask_to_library(
